@@ -155,23 +155,22 @@ vec3 getSkyColor(vec3 e){
   sky = mix(sky, vec3(1.0, 0.82, 0.62), pow(sun, 4.0) * 0.55);
 
   // bright glow around the sun
-  sky += vec3(1.0, 0.85, 0.65) * pow(sun, 60.0) * 0.35 * (0.4 + uLight*0.6);
+  sky += vec3(1.0, 0.85, 0.65) * pow(sun, 25.0) * 0.6 * (0.5 + uLight);
 
   // the sun disc itself (soft edge)
-  float disc = smoothstep(0.99997, 0.999995, sun);
-  sky += vec3(1.0, 0.96, 0.88) * disc * (1.2 + uLight);
+  float disc = smoothstep(0.9992, 0.9997, sun);
+  sky += vec3(1.0, 0.96, 0.88) * disc * (2.5 + uLight * 2.0);
 
   return sky * (0.6 + uLight*0.7);
 }
 
 // ---- one octave of the ocean surface ----
-const mat2 rotM = mat2(0.8, -0.6, 0.6, 0.8);
 float sea_octave(vec2 uv, float choppy){
-  uv = rotM * uv;
   uv += noise(uv);
-  // rounded cosine profiles -> no straight triangular crests
-  vec2 wv = 0.5 + 0.5 * cos(uv);
-  return pow(wv.x * wv.y, choppy);
+  vec2 wv = 1.0 - abs(sin(uv));
+  vec2 swv = abs(cos(uv));
+  wv = mix(wv, swv, wv);
+  return pow(1.0 - pow(wv.x * wv.y, 0.65), choppy);
 }
 
 // ---- height field ----
@@ -257,13 +256,13 @@ void main(){
 
   // sun direction from mouse (azimuth + elevation)
   float az = (uMouse.x - 0.5) * 3.0;
-  float el = 0.12 + uMouse.y * 0.6;
-  L = normalize(vec3(sin(az)*cos(el), el, cos(az)*cos(el)));
+  float el = 0.15 + uMouse.y * 0.9;
+  L = normalize(vec3(sin(az)*cos(el), el, -cos(az)*cos(el)));
 
   // camera
   float camH = 3.5;
   vec3 ori = vec3(0.0, camH, uTime * 0.6);
-  float pitch = mix(-0.40, 0.16, uMouse.y);   // view changes with mouse
+  float pitch = -0.28;   // look slightly down toward the sea
   vec3 dir = normalize(vec3(uv.x, uv.y + pitch, 1.5));
 
   vec3 color;
@@ -279,8 +278,8 @@ void main(){
     // widen normal sampling with distance to avoid aliased white specular lines
     vec3 n = getNormal(p, d2 * (0.02 / uRes.x));
     // flatten the surface toward the horizon so distant waves don't sparkle
-    float fltn = clamp(d2 * 0.00004, 0.0, 0.9);
-    n = normalize(mix(n, vec3(0.0, 1.0, 0.0), fltn));
+    float flat = clamp(d2 * 0.00004, 0.0, 0.9);
+    n = normalize(mix(n, vec3(0.0, 1.0, 0.0), flat));
     color = getSeaColor(p, n, L, dir, dist);
 
     // fade distant sea into sky at the horizon (atmospheric haze), smooth seam
