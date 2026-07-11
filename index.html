@@ -155,17 +155,19 @@ vec3 getSkyColor(vec3 e){
   sky = mix(sky, vec3(1.0, 0.82, 0.62), pow(sun, 4.0) * 0.55);
 
   // bright glow around the sun
-  sky += vec3(1.0, 0.85, 0.65) * pow(sun, 25.0) * 0.6 * (0.5 + uLight);
+  sky += vec3(1.0, 0.85, 0.65) * pow(sun, 60.0) * 0.35 * (0.4 + uLight*0.6);
 
   // the sun disc itself (soft edge)
-  float disc = smoothstep(0.99993, 0.99998, sun);
+  float disc = smoothstep(0.99997, 0.999995, sun);
   sky += vec3(1.0, 0.96, 0.88) * disc * (1.2 + uLight);
 
   return sky * (0.6 + uLight*0.7);
 }
 
 // ---- one octave of the ocean surface ----
+const mat2 rotM = mat2(0.8, -0.6, 0.6, 0.8);
 float sea_octave(vec2 uv, float choppy){
+  uv = rotM * uv;
   uv += noise(uv);
   vec2 wv = 1.0 - abs(sin(uv));
   vec2 swv = abs(cos(uv));
