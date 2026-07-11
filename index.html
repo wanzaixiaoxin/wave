@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>海浪模拟</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  #scene { display: block; width: 100vw; height: 100vh; }
+
+  .panel {
+    position: fixed; top: 20px; left: 20px;
+    width: 260px; padding: 20px 22px;
+    background: rgba(12, 26, 40, 0.42);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 16px;
+    color: #eaf4ff;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.25);
+    user-select: none;
+    transition: transform .4s ease, opacity .4s ease;
+    z-index: 10;
+  }
+  .panel h1 {
+    font-size: 17px; font-weight: 600; letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+  .panel .sub { font-size: 11px; opacity: .55; margin-bottom: 18px; letter-spacing: 1px; }
+
+  .ctrl { margin-bottom: 16px; }
+  .ctrl label {
+    display: flex; justify-content: space-between;
+    font-size: 12.5px; margin-bottom: 8px; opacity: .9;
+  }
+  .ctrl label .val { opacity: .6; font-variant-numeric: tabular-nums; }
+
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 4px; border-radius: 4px;
+    background: rgba(255,255,255,0.18);
+    outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #cfeaff;
+    box-shadow: 0 0 8px rgba(180,220,255,0.8);
+    cursor: pointer; transition: transform .15s;
+  }
+  input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+  input[type=range]::-moz-range-thumb {
+    width: 16px; height: 16px; border: none; border-radius: 50%;
+    background: #cfeaff; cursor: pointer;
+  }
+
+  .hint {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: rgba(255,255,255,0.4); letter-spacing: 1px;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<div class="panel">
+  <h1>海浪模拟</h1>
+  <div class="sub">OCEAN SIMULATION</div>
+
+  <div class="ctrl">
+    <label>风速 <span class="val" id="windVal">6.0</span></label>
+    <input type="range" id="wind" min="0" max="20" step="0.1" value="6">
+  </div>
+  <div class="ctrl">
+    <label>浪高 <span class="val" id="heightVal">1.0</span></label>
+    <input type="range" id="height" min="0" max="3" step="0.05" value="1">
+  </div>
+  <div class="ctrl">
+    <label>光照 <span class="val" id="lightVal">0.65</span></label>
+    <input type="range" id="light" min="0" max="1" step="0.01" value="0.65">
+  </div>
+</div>
+
+<div class="hint">拖动滑块调整海面 · 移动鼠标改变视角</div>
+
+<script>
+const canvas = document.getElementById('scene');
+const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+if (!gl) { document.body.innerHTML = '<p style="color:#fff;padding:40px">您的浏览器不支持 WebGL</p>'; }
+
+// ---------- shaders ----------
+const vertSrc = `
+attribute vec2 aPos;
+void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+const fragSrc = `
+precision highp float;
+uniform vec2  uRes;
+uniform float uTime;
+uniform float uWind;    // wind speed  (0..20)
+uniform float uHeight;  // wave height (0..3)
+uniform float uLight;   // light intensity (0..1)
+uniform vec2  uMouse;
+
+// ================= Realistic ray-marched ocean =================
+// Technique inspired by Alexander Alekseev's "Seascape" (heightfield
+// ray-marching + iterative octave waves), extended with adjustable
+// wind / wave-height / lighting.
+
+const int   STEPS_GEOM  = 6;
+const int   OCTAVES     = 5;
+const float SEA_BASE    = 0.0;
+const float PI          = 3.141592;
+
+float uSeaHeight;   // set in main from uHeight
+float uSeaChoppy;   // set in main from uWind
+float uSeaSpeed;    // set in main from uWind
+vec3  L;            // sun direction
+
+mat2 octaveM = mat2(1.6, 1.2, -1.2, 1.6);
+
+// ---- hash / noise ----
+float hash(vec2 p){
+  float h = dot(p, vec2(127.1, 311.7));
+  return fract(sin(h) * 43758.5453123);
+}
+float noise(in vec2 p){
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return -1.0 + 2.0 * mix(
+    mix(hash(i+vec2(0.0,0.0)), hash(i+vec2(1.0,0.0)), u.x),
+    mix(hash(i+vec2(0.0,1.0)), hash(i+vec2(1.0,1.0)), u.x), u.y);
+}
+
+// ---- lighting ----
+float diffuse(vec3 n, vec3 l, float p){ return pow(dot(n,l)*0.4+0.6, p); }
+float specular(vec3 n, vec3 l, vec3 e, float s){
+  float nrm = (s+8.0)/(PI*8.0);
+  return pow(max(dot(reflect(e,n), l), 0.0), s) * nrm;
+}
+
+// ---- sky ----
+vec3 getSkyColor(vec3 e){
+  vec3 dir = normalize(e);
+  float ey = (max(e.y, 0.0)*0.8 + 0.2) * 0.8;
+  vec3 sky = vec3(pow(1.0-ey, 2.0), 1.0-ey, 0.6+(1.0-ey)*0.4) * 1.1;
+
+  float sun = clamp(dot(dir, L), 0.0, 1.0);
+
+  // atmospheric halo warms the sky near the sun
+  sky = mix(sky, vec3(1.0, 0.82, 0.62), pow(sun, 4.0) * 0.55);
+
+  // bright glow around the sun
+  sky += vec3(1.0, 0.85, 0.65) * pow(sun, 25.0) * 0.6 * (0.5 + uLight);
+
+  // the sun disc itself (soft edge)
+  float disc = smoothstep(0.9992, 0.9997, sun);
+  sky += vec3(1.0, 0.96, 0.88) * disc * (2.5 + uLight * 2.0);
+
+  return sky * (0.6 + uLight*0.7);
+}
+
+// ---- one octave of the ocean surface ----
+float sea_octave(vec2 uv, float choppy){
+  uv += noise(uv);
+  vec2 wv = 1.0 - abs(sin(uv));
+  vec2 swv = abs(cos(uv));
+  wv = mix(wv, swv, wv);
+  return pow(1.0 - pow(wv.x * wv.y, 0.65), choppy);
+}
+
+// ---- height field ----
+float map(vec3 p, int iters){
+  float freq = 0.16;
+  float amp  = uSeaHeight;
+  float choppy = uSeaChoppy;
+  vec2 uv = p.xz; uv.x *= 0.75;
+  float t = 1.0 + uTime * uSeaSpeed;
+  float h = 0.0;
+  for(int i=0;i<OCTAVES;i++){
+    if(i>=iters) break;
+    float d = sea_octave((uv + t) * freq, choppy);
+    d += sea_octave((uv - t) * freq, choppy);
+    h += d * amp;
+    uv = octaveM * uv;
+    freq *= 1.9; amp *= 0.22;
+    choppy = mix(choppy, 1.0, 0.2);
+  }
+  return p.y - h;
+}
+
+vec3 getSeaColor(vec3 p, vec3 n, vec3 l, vec3 eye, vec3 dist){
+  vec3 SEA_BASE_C  = vec3(0.0, 0.09, 0.18);
+  vec3 SEA_WATER_C = vec3(0.48, 0.54, 0.36) * 0.6;
+
+  float fresnel = clamp(1.0 - dot(n, -eye), 0.0, 1.0);
+  fresnel = min(pow(fresnel, 3.0), 0.5);
+
+  vec3 reflected = getSkyColor(reflect(eye, n));
+  vec3 refracted = SEA_BASE_C + diffuse(n, l, 80.0) * SEA_WATER_C * 0.12;
+
+  vec3 color = mix(refracted, reflected, fresnel);
+
+  // sub-surface / wave crest brightening
+  float atten = max(1.0 - dot(dist, dist) * 0.001, 0.0);
+  color += SEA_WATER_C * (p.y - SEA_BASE) * 0.18 * atten;
+
+  // specular sun highlight, attenuated with distance to kill aliasing lines
+  float specAtten = 1.0 / (1.0 + dot(dist, dist) * 0.0006);
+  color += vec3(1.0, 0.95, 0.85) * specular(n, l, eye, 60.0) * (0.6 + uLight*1.6) * specAtten;
+
+  return color * (0.5 + uLight*0.8);
+}
+
+// ---- normal from heightfield ----
+vec3 getNormal(vec3 p, float eps){
+  vec3 n;
+  n.y = map(p, OCTAVES);
+  n.x = map(vec3(p.x+eps, p.y, p.z), OCTAVES) - n.y;
+  n.z = map(vec3(p.x, p.y, p.z+eps), OCTAVES) - n.y;
+  n.y = eps;
+  return normalize(n);
+}
+
+// ---- ray march the height field ----
+float heightMapTracing(vec3 ori, vec3 dir, out vec3 p){
+  float tm = 0.0;
+  float tx = 1000.0;
+  float hx = map(ori + dir * tx, 4);
+  if(hx > 0.0){ p = ori + dir * tx; return tx; }
+  float hm = map(ori + dir * tm, 4);
+  float tmid = 0.0;
+  for(int i=0;i<STEPS_GEOM;i++){
+    tmid = mix(tm, tx, hm/(hm-hx));
+    p = ori + dir * tmid;
+    float hmid = map(p, 4);
+    if(hmid < 0.0){ tx = tmid; hx = hmid; }
+    else { tm = tmid; hm = hmid; }
+  }
+  return tmid;
+}
+
+void main(){
+  vec2 uv = gl_FragCoord.xy / uRes.xy;
+  uv = uv * 2.0 - 1.0;
+  uv.x *= uRes.x / uRes.y;
+
+  // map controls
+  uSeaHeight = 0.15 + uHeight * 0.75;
+  uSeaChoppy = 1.5 + uWind * 0.28;
+  uSeaSpeed  = 0.4 + uWind * 0.14;
+
+  // sun direction from mouse (azimuth + elevation)
+  float az = (uMouse.x - 0.5) * 3.0;
+  float el = 0.15 + uMouse.y * 0.9;
+  L = normalize(vec3(sin(az)*cos(el), el, -cos(az)*cos(el)));
+
+  // camera
+  float camH = 3.5;
+  vec3 ori = vec3(0.0, camH, uTime * 0.6);
+  float pitch = -0.28;   // look slightly down toward the sea
+  vec3 dir = normalize(vec3(uv.x, uv.y + pitch, 1.5));
+
+  vec3 color;
+  vec3 sky = getSkyColor(dir);
+  if(dir.y > -0.02){
+    // looking at / above horizon -> sky
+    color = sky;
+  } else {
+    vec3 p;
+    heightMapTracing(ori, dir, p);
+    vec3 dist = p - ori;
+    float d2 = dot(dist, dist);
+    // widen normal sampling with distance to avoid aliased white specular lines
+    vec3 n = getNormal(p, d2 * (0.02 / uRes.x));
+    // flatten the surface toward the horizon so distant waves don't sparkle
+    float flat = clamp(d2 * 0.00004, 0.0, 0.9);
+    n = normalize(mix(n, vec3(0.0, 1.0, 0.0), flat));
+    color = getSeaColor(p, n, L, dir, dist);
+
+    // fade distant sea into sky at the horizon (atmospheric haze), smooth seam
+    float fog = smoothstep(-0.02, -0.12, dir.y);
+    color = mix(sky, color, clamp(fog, 0.0, 1.0));
+  }
+
+  // tone map + gamma
+  color = pow(color, vec3(0.75));
+  // subtle vignette
+  vec2 q = gl_FragCoord.xy / uRes.xy;
+  color *= 0.9 + 0.1 * smoothstep(1.3, 0.2, length(q - 0.5));
+
+  gl_FragColor = vec4(color, 1.0);
+}
+`;
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    console.error(gl.getShaderInfoLog(s));
+  }
+  return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, vertSrc));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fragSrc));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'aPos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uRes = gl.getUniformLocation(prog, 'uRes');
+const uTime = gl.getUniformLocation(prog, 'uTime');
+const uWind = gl.getUniformLocation(prog, 'uWind');
+const uHeight = gl.getUniformLocation(prog, 'uHeight');
+const uLight = gl.getUniformLocation(prog, 'uLight');
+const uMouse = gl.getUniformLocation(prog, 'uMouse');
+
+let state = { wind: 6, height: 1, light: 0.65, mx: 0.5, my: 0.5 };
+
+function bind(id, valId, key, dec){
+  const el = document.getElementById(id);
+  const out = document.getElementById(valId);
+  const upd = () => { state[key] = parseFloat(el.value); out.textContent = parseFloat(el.value).toFixed(dec); };
+  el.addEventListener('input', upd); upd();
+}
+bind('wind','windVal','wind',1);
+bind('height','heightVal','height',2);
+bind('light','lightVal','light',2);
+
+window.addEventListener('mousemove', e => {
+  state.mx = e.clientX / window.innerWidth;
+  state.my = 1.0 - e.clientY / window.innerHeight;
+});
+
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  gl.viewport(0,0,canvas.width,canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+const start = performance.now();
+function frame(){
+  const t = (performance.now() - start) / 1000;
+  gl.uniform2f(uRes, canvas.width, canvas.height);
+  gl.uniform1f(uTime, t);
+  gl.uniform1f(uWind, state.wind);
+  gl.uniform1f(uHeight, state.height);
+  gl.uniform1f(uLight, state.light);
+  gl.uniform2f(uMouse, state.mx, state.my);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
