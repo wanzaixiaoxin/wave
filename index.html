@@ -278,8 +278,8 @@ void main(){
     // widen normal sampling with distance to avoid aliased white specular lines
     vec3 n = getNormal(p, d2 * (0.02 / uRes.x));
     // flatten the surface toward the horizon so distant waves don't sparkle
-    float flat = clamp(d2 * 0.00004, 0.0, 0.9);
-    n = normalize(mix(n, vec3(0.0, 1.0, 0.0), flat));
+    float fltn = clamp(d2 * 0.00004, 0.0, 0.9);
+    n = normalize(mix(n, vec3(0.0, 1.0, 0.0), fltn));
     color = getSeaColor(p, n, L, dir, dist);
 
     // fade distant sea into sky at the horizon (atmospheric haze), smooth seam
