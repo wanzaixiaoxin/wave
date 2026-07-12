@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>都市驾驶 3D</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#0b0e13;
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  #app { display:block; width:100vw; height:100vh; }
+  .hud { position:fixed; top:16px; left:50%; transform:translateX(-50%);
+    display:flex; gap:26px; padding:10px 24px; background:rgba(0,0,0,.45);
+    color:#fff; border-radius:12px; font-size:13px; letter-spacing:1px; z-index:10;
+    backdrop-filter:blur(6px); }
+  .hud b { font-size:20px; margin-left:6px; }
+  .help { position:fixed; bottom:16px; left:50%; transform:translateX(-50%);
+    color:rgba(255,255,255,.55); font-size:12px; z-index:10; letter-spacing:1px; }
+  #minimap { position:fixed; right:16px; top:16px; z-index:10;
+    background:rgba(0,0,0,.4); border:1px solid rgba(255,255,255,.2); border-radius:8px; }
+  #loading { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    color:#cdd; font-size:16px; letter-spacing:3px; z-index:30; }
+  #err { position:fixed; top:0; left:0; z-index:999; color:#fbb; background:rgba(0,0,0,.9);
+    padding:12px; font-size:12px; max-width:100%; white-space:pre-wrap; display:none; }
+</style>
+</head>
+<body>
+<canvas id="app"></canvas>
+
+<div class="hud">
+  <div>时速<b id="spd">0</b> km/h</div>
+  <div>状态<b id="mode">驾驶</b></div>
+  <div>视角<b id="view">追尾</b></div>
+</div>
+<div class="help">WASD / 方向键 驾驶·步行 · F 上下车 · R 重置 · C 切换视角</div>
+<canvas id="minimap" width="180" height="180"></canvas>
+<div id="loading">加载中…</div>
+<pre id="err"></pre>
+
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+const showErr = (m) => { const b = document.getElementById('err'); b.style.display='block'; b.textContent = '运行错误:\n'+m; };
+window.onerror = (m,s,l,c,e) => showErr((m||'')+'\n'+(e&&e.stack?e.stack:('@'+l+':'+c)));
+
+const canvas = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9fc3e8);
+scene.fog = new THREE.Fog(0x9fc3e8, 140, 560);
+
+const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1200);
+
+function resize(){
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize); resize();
+
+const sun = new THREE.DirectionalLight(0xffffff, 2.1);
+sun.position.set(120, 200, 80);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 10; sun.shadow.camera.far = 760;
+const sc = 340;
+sun.shadow.camera.left = -sc; sun.shadow.camera.right = sc;
+sun.shadow.camera.top = sc; sun.shadow.camera.bottom = -sc;
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xbfd6ff, 0x40453a, 0.9));
+
+// ---------- world / city ----------
+const GRID = 7;
+const BLOCK = 46;
+const ROAD = 18;
+const SPAN = BLOCK + ROAD;
+const HALF_WORLD = (GRID * SPAN) / 2;
+const SPAWN_X = -HALF_WORLD, SPAWN_Z = -HALF_WORLD;
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(GRID*SPAN + ROAD*4, GRID*SPAN + ROAD*4),
+  new THREE.MeshStandardMaterial({ color: 0x33373d, roughness:1 })
+);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const laneMat = new THREE.MeshStandardMaterial({ color: 0xd8c24a, roughness:1 });
+function addLane(x, z, w, d){
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), laneMat);
+  m.rotation.x = -Math.PI/2; m.position.set(x, 0.02, z);
+  scene.add(m);
+}
+for(let i=0;i<=GRID;i++){
+  const p = -HALF_WORLD + i*SPAN - ROAD/2;
+  addLane(p, 0, 0.4, GRID*SPAN);
+  addLane(0, p, GRID*SPAN, 0.4);
+}
+
+// buildings + collision AABBs (static only)
+const BUILDINGS = [];
+const palette = [0x8a8f98, 0x9c8f7a, 0x76808c, 0xa5a29b, 0x6f7b74, 0x94795f];
+function addBuilding(cx, cz){
+  const pad = 3 + Math.random()*3;
+  const w = BLOCK - pad*2, d = BLOCK - pad*2;
+  const h = 12 + Math.random()*54;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshStandardMaterial({ color: palette[(Math.random()*palette.length)|0], roughness:0.85 }));
+  m.position.set(cx, h/2, cz);
+  m.castShadow = true; m.receiveShadow = true;
+  scene.add(m);
+  const sw = new THREE.Mesh(new THREE.PlaneGeometry(BLOCK-1, BLOCK-1),
+    new THREE.MeshStandardMaterial({ color:0x555b61, roughness:1 }));
+  sw.rotation.x = -Math.PI/2; sw.position.set(cx, 0.03, cz);
+  sw.receiveShadow = true; scene.add(sw);
+  BUILDINGS.push({ minx:cx-w/2, maxx:cx+w/2, minz:cz-d/2, maxz:cz+d/2 });
+}
+for(let i=0;i<GRID;i++) for(let j=0;j<GRID;j++){
+  if(i===((GRID/2)|0) && j===((GRID/2)|0)) continue; // plaza near center
+  const cx = -HALF_WORLD + ROAD/2 + BLOCK/2 + i*SPAN;
+  const cz = -HALF_WORLD + ROAD/2 + BLOCK/2 + j*SPAN;
+  addBuilding(cx, cz);
+}
+
+// ---------- car factory ----------
+function makeCarMesh(color){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.7, 4.2),
+    new THREE.MeshStandardMaterial({ color, roughness:0.5, metalness:0.2 }));
+  body.position.y = 0.6; body.castShadow = true; g.add(body);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.6, 2.0),
+    new THREE.MeshStandardMaterial({ color:0x1b2733, roughness:0.3 }));
+  cabin.position.set(0, 1.15, -0.2); cabin.castShadow = true; g.add(cabin);
+  const wheelGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.35, 12);
+  const wheelMat = new THREE.MeshStandardMaterial({ color:0x111417, roughness:0.9 });
+  const wx = 1.0, wz = 1.4;
+  for(const [sx,sz] of [[-wx,wz],[wx,wz],[-wx,-wz],[wx,-wz]]){
+    const w = new THREE.Mesh(wheelGeo, wheelMat);
+    w.rotation.z = Math.PI/2; w.position.set(sx, 0.45, sz); w.castShadow = true; g.add(w);
+  }
+  return g;
+}
+
+// ---------- car list (player + parked / stealable) ----------
+const CAR_R = 1.9;
+const cars = [];
+function addCar(color, x, z, ang){
+  const mesh = makeCarMesh(color);
+  mesh.position.set(x, 0, z); mesh.rotation.y = ang;
+  scene.add(mesh);
+  const c = { mesh, x, z, ang, v:0, steer:0, r:CAR_R };
+  cars.push(c);
+  return c;
+}
+const playerCar = addCar(0xe63946, SPAWN_X, SPAWN_Z, 0);
+
+// parked (stealable) cars along roads
+for(let k=0;k<12;k++){
+  const vert = Math.random()<0.5;
+  const line = (Math.random()*(GRID+1))|0;
+  const road = -HALF_WORLD + line*SPAN;
+  const lane = (Math.random()<0.5?1:-1)*(ROAD/2 - 3);
+  let x, z;
+  if(vert){ x = road + lane; z = -HALF_WORLD + ROAD/2 + Math.random()*GRID*SPAN; }
+  else    { z = road + lane; x = -HALF_WORLD + ROAD/2 + Math.random()*GRID*SPAN; }
+  addCar(0x55606e + ((Math.random()*0x223344)&0xffffff), x, z, vert ? (lane>0?Math.PI/2:-Math.PI/2) : (lane>0?0:Math.PI));
+}
+
+// ---------- pedestrian player ----------
+const ped = { x:0, z:0, ang:0, v:0, r:0.6 };
+const PED_R = 0.6;
+const playerMesh = new THREE.Group();
+{
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 0.9, 4, 10),
+    new THREE.MeshStandardMaterial({ color:0x2a9d8f, roughness:0.7 }));
+  body.position.y = 0.9; body.castShadow = true; playerMesh.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 12),
+    new THREE.MeshStandardMaterial({ color:0xf1c27d, roughness:0.8 }));
+  head.position.y = 1.65; head.castShadow = true; playerMesh.add(head);
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(0.15,0.15,0.2),
+    new THREE.MeshStandardMaterial({ color:0xf1c27d }));
+  nose.position.set(0,1.65,0.32); playerMesh.add(nose); // facing +Z = forward
+}
+scene.add(playerMesh);
+
+// ---------- NPC traffic ----------
+const traffic = [];
+const TRAFFIC_R = 1.7;
+function spawnTraffic(n){
+  for(let i=0;i<n;i++){
+    const vert = Math.random()<0.5;
+    const line = (Math.random()*(GRID+1))|0;
+    const road = -HALF_WORLD + line*SPAN;
+    const lane = (Math.random()<0.5?1:-1)*ROAD/4;
+    const t = { axis: vert?'z':'x', dir: Math.random()<0.5?1:-1, speed: 15+Math.random()*13, r:TRAFFIC_R };
+    if(vert){ t.x = road + lane; t.z = -HALF_WORLD + Math.random()*GRID*SPAN; }
+    else    { t.z = road + lane; t.x = -HALF_WORLD + Math.random()*GRID*SPAN; }
+    t.mesh = makeCarMesh(0x33506e + ((Math.random()*0x222222)|0));
+    t.mesh.position.set(t.x, 0, t.z); scene.add(t.mesh);
+    traffic.push(t);
+  }
+}
+spawnTraffic(9);
+
+// ---------- state ----------
+let mode = 'car';          // 'car' | 'foot'
+let activeCar = playerCar;
+let view = 0;              // 0 chase, 1 interior (car only)
+
+// ---------- input ----------
+const keys = {};
+window.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+  if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
+  if(k === 'r') resetGame();
+  if(k === 'c' || k === 'v'){ if(mode==='car') view = view === 0 ? 1 : 0; }
+  if(k === 'f') toggleVehicle();
+});
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+function resetGame(){
+  playerCar.x = SPAWN_X; playerCar.z = SPAWN_Z; playerCar.ang = 0; playerCar.v = 0; playerCar.steer = 0;
+  playerCar.mesh.position.set(playerCar.x, 0, playerCar.z); playerCar.mesh.rotation.y = playerCar.ang;
+  mode = 'car'; activeCar = playerCar; playerMesh.visible = false;
+}
+function nearestCar(x, z, maxD){
+  let best=null, bd=maxD;
+  for(const c of cars){ const d=Math.hypot(c.x-x, c.z-z); if(d<bd){ bd=d; best=c; } }
+  return best;
+}
+function toggleVehicle(){
+  if(mode === 'car'){
+    ped.x = activeCar.x - Math.sin(activeCar.ang)*3.6;
+    ped.z = activeCar.z - Math.cos(activeCar.ang)*3.6;
+    ped.ang = activeCar.ang; ped.v = 0;
+    mode = 'foot'; activeCar = null; playerMesh.visible = true;
+  } else {
+    const c = nearestCar(ped.x, ped.z, 4.5);
+    if(c){ activeCar = c; mode = 'car'; playerMesh.visible = false; }
+  }
+}
+resetGame();
+
+// ---------- collision ----------
+function blocked(x, z, r, ignore){
+  for(const b of BUILDINGS)
+    if(x > b.minx-r && x < b.maxx+r && z > b.minz-r && z < b.maxz+r) return true;
+  for(const c of cars){
+    if(c === ignore) continue;
+    if(x > c.x-1.6-r && x < c.x+1.6+r && z > c.z-1.6-r && z < c.z+1.6+r) return true;
+  }
+  for(const t of traffic)
+    if(x > t.x-1.7-r && x < t.x+1.7+r && z > t.z-1.7-r && z < t.z+1.7+r) return true;
+  return false;
+}
+
+// ---------- physics ----------
+const MAXV = 55, ACCEL = 34, TURN = 1.7;
+function driveCar(c, dt){
+  let throttle=0, steerIn=0;
+  if(keys['arrowup']||keys['w']) throttle += 1;
+  if(keys['arrowdown']||keys['s']) throttle -= 1;
+  if(keys['arrowleft']||keys['a']) steerIn -= 1;
+  if(keys['arrowright']||keys['d']) steerIn += 1;
+  c.v += throttle * ACCEL * dt;
+  c.v -= c.v * Math.abs(c.v) * 0.00035 * dt;
+  if(throttle === 0) c.v -= c.v * Math.min(1, 0.7*dt);
+  c.v = Math.max(-MAXV*0.4, Math.min(MAXV, c.v));
+  const steerRate = steerIn !== 0 ? 5 : 8;
+  c.steer += (steerIn - c.steer) * Math.min(1, steerRate*dt);
+  const sf = Math.max(-1, Math.min(1, c.v/12));
+  c.ang -= c.steer * TURN * dt * sf;
+  const fx = Math.sin(c.ang), fz = Math.cos(c.ang);
+  const dx = fx*c.v*dt, dz = fz*c.v*dt;
+  if(!blocked(c.x+dx, c.z, CAR_R, c)) c.x += dx; else c.v *= 0.4;
+  if(!blocked(c.x, c.z+dz, CAR_R, c)) c.z += dz; else c.v *= 0.4;
+  c.mesh.position.set(c.x, 0, c.z); c.mesh.rotation.y = c.ang;
+}
+function walkPed(dt){
+  let mv=0, turnIn=0;
+  if(keys['w']||keys['arrowup']) mv += 1;
+  if(keys['s']||keys['arrowdown']) mv -= 1;
+  if(keys['a']||keys['arrowleft']) turnIn -= 1;
+  if(keys['d']||keys['arrowright']) turnIn += 1;
+  ped.ang += turnIn * 2.6 * dt;
+  const target = mv * 6;
+  ped.v += (target - ped.v) * Math.min(1, 10*dt);
+  const fx = Math.sin(ped.ang), fz = Math.cos(ped.ang);
+  const dx = fx*ped.v*dt, dz = fz*ped.v*dt;
+  if(!blocked(ped.x+dx, ped.z, PED_R, null)) ped.x += dx; else ped.v = 0;
+  if(!blocked(ped.x, ped.z+dz, PED_R, null)) ped.z += dz; else ped.v = 0;
+  playerMesh.position.set(ped.x, 0, ped.z); playerMesh.rotation.y = ped.ang;
+}
+function updateTraffic(dt){
+  for(const t of traffic){
+    if(t.axis === 'z'){
+      t.z += t.dir*t.speed*dt;
+      if(t.z > HALF_WORLD+SPAN) t.z = -HALF_WORLD-SPAN;
+      if(t.z < -HALF_WORLD-SPAN) t.z = HALF_WORLD+SPAN;
+    } else {
+      t.x += t.dir*t.speed*dt;
+      if(t.x > HALF_WORLD+SPAN) t.x = -HALF_WORLD-SPAN;
+      if(t.x < -HALF_WORLD-SPAN) t.x = HALF_WORLD+SPAN;
+    }
+    t.mesh.position.set(t.x, 0, t.z);
+    t.mesh.rotation.y = t.axis==='z' ? (t.dir>0?0:Math.PI) : (t.dir>0?Math.PI/2:-Math.PI/2);
+  }
+}
+
+// ---------- camera ----------
+const camPos = new THREE.Vector3();
+const camLook = new THREE.Vector3();
+const V = (x,y,z) => new THREE.Vector3(x,y,z);
+function updateCamera(dt){
+  const fx = mode==='car' ? Math.sin(activeCar.ang) : Math.sin(ped.ang);
+  const fz = mode==='car' ? Math.cos(activeCar.ang) : Math.cos(ped.ang);
+  const px = mode==='car' ? activeCar.x : ped.x;
+  const pz = mode==='car' ? activeCar.z : ped.z;
+  let target, look;
+  if(mode==='car'){
+    if(view===0){ target = V(px-fx*11, 6.5, pz-fz*11); look = V(px+fx*6, 1.5, pz+fz*6); }
+    else        { target = V(px+fx*0.2, 1.9, pz+fz*0.2); look = V(px+fx*20, 1.6, pz+fz*20); }
+  } else {
+    target = V(px-fx*6, 4.6, pz-fz*6); look = V(px+fx*4, 1.2, pz+fz*4);
+  }
+  const a = Math.min(1, (mode==='car' ? (view===0?7:20) : 9) * dt);
+  camPos.lerp(target, a); camLook.lerp(look, a);
+  camera.position.copy(camPos); camera.lookAt(camLook);
+}
+camPos.set(playerCar.x, 6.5, playerCar.z-11); camLook.set(playerCar.x, 1.5, playerCar.z);
+
+// ---------- minimap ----------
+const mm = document.getElementById('minimap');
+const mc = mm.getContext('2d');
+function drawMinimap(){
+  const W = mm.width, H = mm.height, pad = 8;
+  const worldSpan = GRID*SPAN + ROAD*2;
+  const s = (W - pad*2) / worldSpan;
+  const toX = wx => W/2 + wx*s, toY = wz => H/2 + wz*s;
+  mc.clearRect(0,0,W,H);
+  mc.fillStyle = '#2a2e33'; mc.fillRect(pad, pad, W-pad*2, H-pad*2);
+  mc.fillStyle = '#6b7580';
+  for(const b of BUILDINGS) mc.fillRect(toX(b.minx), toY(b.minz), (b.maxx-b.minx)*s, (b.maxz-b.minz)*s);
+  mc.fillStyle = '#445';
+  for(const c of cars) mc.fillRect(toX(c.x)-2, toY(c.z)-2, 4, 4);
+  for(const t of traffic) mc.fillRect(toX(t.x)-2, toY(t.z)-2, 4, 4);
+  const cx = mode==='car' ? activeCar.x : ped.x;
+  const cz = mode==='car' ? activeCar.z : ped.z;
+  const ca = mode==='car' ? activeCar.ang : ped.ang;
+  mc.save(); mc.translate(toX(cx), toY(cz)); mc.rotate(-ca);
+  mc.fillStyle = '#e63946';
+  mc.beginPath(); mc.moveTo(0,-6); mc.lineTo(4,5); mc.lineTo(-4,5); mc.closePath(); mc.fill();
+  mc.restore();
+}
+
+// ---------- HUD ----------
+const spdEl = document.getElementById('spd');
+const modeEl = document.getElementById('mode');
+const viewEl = document.getElementById('view');
+function drawHUD(){
+  const v = mode==='car' ? activeCar.v : ped.v;
+  spdEl.textContent = Math.round(Math.abs(v) * 3.6);
+  modeEl.textContent = mode==='car' ? '驾驶' : '步行';
+  viewEl.textContent = mode==='car' ? (view===0?'追尾':'车内') : '—';
+}
+
+// ---------- loop ----------
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(0.033, (now-last)/1000); last = now;
+  updateTraffic(dt);
+  if(mode==='car') driveCar(activeCar, dt); else walkPed(dt);
+  updateCamera(dt);
+  renderer.render(scene, camera);
+  drawMinimap();
+  drawHUD();
+  requestAnimationFrame(frame);
+}
+document.getElementById('loading').style.display = 'none';
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
