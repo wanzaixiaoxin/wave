@@ -1,0 +1,13 @@
+{
+  "name": "vehicle-tycoon",
+  "version": "1.0.0",
+  "description": "造物运输大亨 - 交通工具养成 × 经济模拟",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "test": "jest --config jest.config.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

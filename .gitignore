@@ -1,3 +1,6 @@
 # Reasonix AI agent config
 reasonix.toml
 .reasonix/
+
+# Node.js
+src/node_modules/
