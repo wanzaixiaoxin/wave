@@ -3,7 +3,7 @@ reasonix.toml
 .reasonix/
 
 # Node.js
-src/node_modules/
+vehicle-tycoon/src/node_modules/
 
 # IDE
 .vscode/
@@ -16,5 +16,5 @@ src/node_modules/
 Thumbs.db
 
 # Build output
-src/dist/
+vehicle-tycoon/src/dist/
 *.js.map

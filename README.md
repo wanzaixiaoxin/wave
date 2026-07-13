@@ -1,64 +1,46 @@
-# 造物运输大亨 🚗
+# Wave 🎮
 
-> 交通工具养成 × 经济模拟 — 从独轮车到星际飞船，每辆车都是你的伙伴
+> 个人游戏开发项目合集
 
-## 项目结构
+## 项目一览
 
 ```
 wave/
-├── docs/                     # 游戏设计文档
-│   ├── 游戏需求文档.md        # 主设计文档 (v2.4 MVP精简版)
-│   ├── 评审报告与修改计划.md   # 四视角评审分析
-│   └── design/               # 详细设计文档
-│       ├── 主策划总纲.md       # 系统完整设计 + 执行策划分工
-│       ├── 产品视觉需求文档.md  # 视觉风格、场景、玩法形态
-│       ├── 主程技术选型与架构决策.md  # 引擎选型 + 4层架构
-│       ├── 主程序技术文档.md    # 数据模型、存档、性能目标
-│       ├── 主美美术文档.md      # 20个车辆设计、UI组件、动画
-│       └── 设计研发管线流程.md   # 设计→开发完整工作流
-├── src/                      # TypeScript 源码
-│   ├── core/                 # 核心基础设施 (EventBus/GameLoop/SaveManager/types)
-│   ├── config/               # 配置表 (车辆/科技/特质/常量)
-│   ├── systems/              # 10个游戏系统
-│   └── index.ts              # 入口，导出所有模块
-├── assets/                   # 美术资源 (占位)
-│   ├── textures/
-│   ├── audio/
-│   └── animations/
-├── .gitignore
-└── README.md
+├── vehicle-tycoon/         # 🚗 造物运输大亨
+│   ├── docs/               #   设计文档
+│   ├── src/                #   TypeScript 源码
+│   └── assets/             #   美术资源
+├── wave-sim/               # 🌊 海浪模拟
+│   └── index.html
+├── gta-driving/            # 🏎️ GTA 驾驶
+│   └── gta.html
+├── racing/                 # 🏁 赛车
+│   └── racing.html
+├── README.md
+└── .gitignore
 ```
 
-## 技术栈
+## vehicle-tycoon（造物运输大亨）
 
-| 项目 | 选择 |
+交通工具养成 × 经济模拟 — 从独轮车到星际飞船，每辆车都是你的伙伴。
+
+| 项目 | 内容 |
 |------|------|
 | 引擎 | Cocos Creator 3.x |
-| 语言 | TypeScript (strict mode) |
-| 渲染 | 纯 2D 扁平插画风 |
-| 平台 | iOS / Android（首发），微信小游戏（备选） |
-| 架构 | 4层单向数据流 + EventBus 解耦 |
+| 语言 | TypeScript (strict) |
+| 平台 | iOS / Android |
+| 状态 | 设计完成，核心逻辑已编码 |
 
-## 快速开始
+详见 [vehicle-tycoon/docs/](vehicle-tycoon/docs/)
 
-```bash
-cd src
-npm install
-npx tsc --noEmit    # 编译检查
-npx tsc             # 编译输出
-```
+## wave-sim（海浪模拟）
 
-## 设计理念
+基于 Three.js 的海浪动态模拟。
 
-- **80% 发展，20% 取舍** — 养车为主，制约为辅
-- **每辆车都是独立个体** — 命名、性格、亲密度、战绩
-- **4 层心流循环** — 微(秒) / 浅(分) / 深(刻) / 终局(时)
-- **不卖数值** — 商业化只做外观和便利
+## gta-driving（GTA 驾驶）
 
-## 版本路线
+GTA 风格的驾驶交互页面。
 
-| 版本 | 内容 |
-|------|------|
-| v1.0 MVP | 10车型 + 进化 + 3订单 + 科技树 + 亲密度 |
-| v1.1 | 挑战模式 + 性格扩充 + 周常活动 |
-| v1.2 | 轮回系统 + 社交轻量 + 月度节日 + 通行证 |
+## racing（赛车）
+
+赛车竞速游戏页面。
