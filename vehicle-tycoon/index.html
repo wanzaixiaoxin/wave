@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>造物运输大亨</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; min-height: 100vh; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #1a1a2e; color: #e0e0e0; }
+
+    #app { display: grid; grid-template-rows: auto 1fr auto; min-height: 100vh; max-width: 800px; margin: 0 auto; padding: 12px; gap: 12px; }
+
+    /* TopBar */
+    #topbar { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #16213e; border-radius: 12px; border: 1px solid #0f3460; }
+    .resource { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 600; }
+    .resource .icon { font-size: 18px; }
+    .resource .value { color: #f1c40f; min-width: 60px; }
+    .resource .value.parts { color: #3498db; }
+
+    /* Garage */
+    #garage { display: flex; flex-direction: column; gap: 8px; }
+    .section-title { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin: 8px 0 4px; }
+    .vehicle-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+    .vehicle-card { background: #16213e; border-radius: 10px; border: 2px solid #0f3460; padding: 10px; cursor: pointer; transition: all 0.2s; }
+    .vehicle-card:hover { border-color: #e94560; transform: translateY(-2px); }
+    .vehicle-card .emoji { font-size: 32px; text-align: center; }
+    .vehicle-card .name { font-size: 14px; font-weight: 600; text-align: center; margin: 4px 0; }
+    .vehicle-card .info { font-size: 11px; color: #aaa; text-align: center; }
+    .vehicle-card .status { font-size: 10px; text-align: center; padding: 2px 8px; border-radius: 4px; display: inline-block; margin-top: 4px; }
+    .status-idle { background: #2ecc71; color: #fff; }
+    .status-order { background: #e67e22; color: #fff; }
+
+    .quality-white { border-color: #bdc3c7; }
+    .quality-blue { border-color: #2980b9; }
+    .quality-gold { border-color: #f1c40f; box-shadow: 0 0 8px rgba(241,196,15,0.3); }
+
+    /* Orders */
+    #orders { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .order-card { background: #16213e; border-radius: 10px; border: 1px solid #0f3460; padding: 10px; text-align: center; }
+    .order-card .type { font-size: 12px; color: #888; }
+    .order-card .reward { font-size: 18px; font-weight: 700; color: #f1c40f; }
+    .order-card button { margin-top: 6px; padding: 4px 12px; border: none; border-radius: 6px; background: #e94560; color: #fff; cursor: pointer; font-size: 12px; }
+    .order-card button:hover { background: #c0392b; }
+    .order-card button:disabled { background: #555; cursor: not-allowed; }
+
+    /* Bottom bar */
+    #bottombar { display: flex; gap: 8px; padding: 8px 0; }
+    #bottombar button { flex: 1; padding: 10px; border: none; border-radius: 8px; background: #0f3460; color: #e0e0e0; font-size: 13px; cursor: pointer; }
+    #bottombar button:hover { background: #16213e; }
+    #bottombar button.active { background: #e94560; }
+
+    /* Panels */
+    .panel { display: none; background: #16213e; border-radius: 12px; padding: 16px; border: 1px solid #0f3460; }
+    .panel.visible { display: block; }
+
+    .tech-tree { display: flex; flex-direction: column; gap: 10px; }
+    .tech-node { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #0f3460; border-radius: 8px; }
+    .tech-node.researched { border-left: 3px solid #2ecc71; }
+    .tech-node.available { border-left: 3px solid #f1c40f; cursor: pointer; }
+    .tech-node.available:hover { background: #16213e; }
+    .tech-node.locked { opacity: 0.5; }
+    .tech-node .name { font-weight: 600; }
+    .tech-node .cost { font-size: 11px; color: #f1c40f; }
+
+    .factory-line { padding: 8px 12px; background: #0f3460; border-radius: 8px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+
+    /* Log */
+    #log { max-height: 120px; overflow-y: auto; font-size: 11px; color: #888; }
+    #log div { padding: 2px 0; border-bottom: 1px solid #0f3460; }
+
+    /* Modals */
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 100; justify-content: center; align-items: center; }
+    .modal-overlay.visible { display: flex; }
+    .modal { background: #16213e; border-radius: 16px; padding: 24px; max-width: 400px; width: 90%; border: 1px solid #0f3460; }
+    .modal h2 { margin-bottom: 12px; }
+    .modal p { margin-bottom: 8px; color: #aaa; font-size: 14px; }
+    .modal button { padding: 8px 20px; border: none; border-radius: 8px; background: #e94560; color: #fff; cursor: pointer; margin-right: 8px; }
+    .modal button:hover { background: #c0392b; }
+
+    .badge { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; margin-left: 4px; }
+    .badge.rare { background: #9b59b6; color: #fff; }
+
+    select, input { padding: 6px 10px; border-radius: 6px; border: 1px solid #0f3460; background: #0f3460; color: #e0e0e0; font-size: 13px; margin: 4px; }
+    button.primary { background: #e94560; }
+    button.secondary { background: #0f3460; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- TopBar -->
+    <div id="topbar">
+      <span class="resource"><span class="icon">🪙</span><span class="value" id="gold">0</span></span>
+      <span class="resource"><span class="icon">⚙️</span><span class="value parts" id="parts">0</span></span>
+      <span class="resource"><span class="icon">💖</span><span id="intimacy-sum">0</span></span>
+      <span style="font-size:12px;color:#888;" id="eps">0/s</span>
+      <span style="font-size:14px;" id="tier-label">🛴 T1</span>
+    </div>
+
+    <!-- Vehicle actions -->
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <select id="build-tier-select">
+        <option value="1">🛴 独轮车 (10🪙)</option>
+        <option value="2">🚲 自行车 (45🪙)</option>
+        <option value="3">🐴 马车 (180🪙)</option>
+        <option value="4">🚗 小汽车 (800🪙)</option>
+        <option value="5">🚛 卡车 (3,200🪙)</option>
+      </select>
+      <button class="primary" id="btn-build" style="padding:6px 16px;border:none;border-radius:8px;background:#e94560;color:#fff;cursor:pointer;">🔧 造车</button>
+      <button class="secondary" id="btn-expand" style="padding:6px 16px;border:none;border-radius:8px;background:#0f3460;color:#e0e0e0;cursor:pointer;">🏠 扩建车库</button>
+    </div>
+
+    <!-- Garage -->
+    <div id="garage">
+      <div class="section-title">🏠 车库 (<span id="garage-count">0</span>/<span id="garage-max">6</span>)</div>
+      <div class="vehicle-grid" id="garage-grid"></div>
+    </div>
+
+    <!-- Orders -->
+    <div class="section-title">📋 订单</div>
+    <div id="orders"></div>
+
+    <!-- Bottom bar tabs -->
+    <div id="bottombar">
+      <button class="active" data-tab="garage">🏠 车库</button>
+      <button data-tab="factory">🏭 工厂</button>
+      <button data-tab="tech">🔬 科技</button>
+      <button data-tab="achievements">🏆 成就</button>
+    </div>
+
+    <!-- Factory panel -->
+    <div class="panel" id="panel-factory">
+      <div class="section-title">🏭 工厂 (Lv.<span id="factory-level">1</span>)</div>
+      <div id="factory-lines"></div>
+      <div style="margin-top:8px;display:flex;gap:6px;">
+        <select id="prod-tier-select">
+          <option value="1">🛴 独轮车</option>
+          <option value="2">🚲 自行车</option>
+          <option value="3">🐴 马车</option>
+          <option value="4">🚗 小汽车</option>
+          <option value="5">🚛 卡车</option>
+        </select>
+        <button id="btn-start-prod" style="padding:6px 12px;border:none;border-radius:8px;background:#e94560;color:#fff;cursor:pointer;">▶ 生产</button>
+        <button id="btn-upgrade-factory" style="padding:6px 12px;border:none;border-radius:8px;background:#0f3460;color:#e0e0e0;cursor:pointer;">⬆ 升级</button>
+      </div>
+    </div>
+
+    <!-- Tech panel -->
+    <div class="panel" id="panel-tech">
+      <div class="section-title">🔬 科技树</div>
+      <div class="tech-tree" id="tech-tree"></div>
+    </div>
+
+    <!-- Achievements panel -->
+    <div class="panel" id="panel-achievements">
+      <div class="section-title">🏆 成就 (<span id="achieve-count">0</span>/<span id="achieve-total">7</span>)</div>
+      <div id="achieve-list"></div>
+    </div>
+
+    <!-- Log -->
+    <div id="log"></div>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal" id="modal-content"></div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
