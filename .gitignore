@@ -4,3 +4,17 @@ reasonix.toml
 
 # Node.js
 src/node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build output
+src/dist/
+*.js.map
