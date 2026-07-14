@@ -1,6 +1,5 @@
 // ============================================================
-// 造物运输大亨 — 运行入口
-// 创建游戏实例，绑定 DOM UI，启动循环
+// 造物运输大亨 — 运行入口（v1.1 体验优化版）
 // ============================================================
 
 import { GameLoop } from './core/GameLoop';
@@ -8,15 +7,15 @@ import { EventBus } from './core/EventBus';
 import { SaveManager } from './core/SaveManager';
 import { GameEvent, GameState, Vehicle, Order, Quality, VehicleStatus, TraitType } from './core/types';
 import { getVehicleConfig, getUnlockedConfigs } from './config/VehicleConfig';
-import { getTraitConfig, rollTrait } from './config/TraitConfig';
-import { GAME_CONSTANTS, garageExpandCost } from './config/GameConstants';
+import { getTraitConfig } from './config/TraitConfig';
+import { GAME_CONSTANTS } from './config/GameConstants';
 
 // ==================== 状态 ====================
 
 let gameLoop: GameLoop;
-let selectedVehicleId: string | null = null;
-let currentTab: string = 'garage';
+let currentTab = 'garage';
 let logMessages: string[] = [];
+let toastIdCounter = 0;
 
 function getState(): GameState {
   return gameLoop.getState();
@@ -37,14 +36,82 @@ function init(): void {
     }
   } else {
     gameLoop = new GameLoop(SaveManager.createInitialState());
-    addLog('🚗 欢迎来到造物运输大亨！先造一辆车开始吧');
+    addLog('🚗 欢迎来到造物运输大亨！');
     addLog('💡 点击「🔧 造车」按钮造你的第一辆独轮车');
+    // 首次进入引导
+    setTimeout(() => {
+      const btn = document.getElementById('btn-build');
+      if (btn) btn.innerHTML = '🔧 造车 <span class="tutorial-arrow">👉</span>';
+      setTimeout(() => {
+        const btn2 = document.getElementById('btn-build');
+        if (btn2) btn2.innerHTML = '🔧 造车';
+      }, 6000);
+    }, 500);
   }
 
   bindEvents();
   bindUI();
   gameLoop.start();
   renderLoop();
+}
+
+// ==================== 飘字动画 ====================
+
+function showFloatingGold(amount: number, isCrit = false): void {
+  const el = document.createElement('div');
+  el.className = 'gold-float';
+  el.textContent = `+${amount}🪙`;
+  el.style.left = `${40 + Math.random() * 20}%`;
+  el.style.top = '45%';
+  if (isCrit) {
+    el.style.fontSize = '36px';
+    el.style.color = '#e94560';
+    el.textContent = `💥 ×${amount > 500 ? '3' : '2'}! +${amount}🪙`;
+  }
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1300);
+}
+
+function showCritEffect(mult: number): void {
+  const el = document.createElement('div');
+  el.className = 'crit-effect';
+  el.textContent = `💥 暴击！×${mult}`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1600);
+}
+
+function goldBounce(): void {
+  const el = document.getElementById('gold');
+  if (!el) return;
+  el.classList.remove('gold-bounce');
+  void el.offsetWidth; // 触发 reflow
+  el.classList.add('gold-bounce');
+}
+
+// ==================== Toast 通知 ====================
+
+function showToast(title: string, body = '', type = 'default'): void {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const id = `toast-${toastIdCounter++}`;
+  const div = document.createElement('div');
+  div.id = id;
+  div.className = 'toast';
+  div.innerHTML = `<div class="toast-title">${title}</div>${body ? `<div class="toast-body">${body}</div>` : ''}`;
+
+  container.appendChild(div);
+
+  // 如果超过 3 条，移除最早的
+  while (container.children.length > 3) {
+    const first = container.firstChild as HTMLElement;
+    if (first) first.remove();
+  }
+
+  setTimeout(() => {
+    div.classList.add('removing');
+    setTimeout(() => div.remove(), 350);
+  }, 3000);
 }
 
 // ==================== 事件监听 ====================
@@ -61,48 +128,57 @@ function bindEvents(): void {
 
   events.forEach(e => EventBus.on(e, (...args: unknown[]) => {
     switch (e) {
+      case GameEvent.ORDER_COMPLETED: {
+        const o = args[0] as Order;
+        const v = args[1] as Vehicle | undefined;
+        const name = v ? v.name : '车辆';
+        showFloatingGold(o.baseReward);
+        goldBounce();
+        showToast(`✅ ${name} 完成订单`, `+${o.baseReward}🪙 +${o.expReward}经验`);
+        addLog(`✅ ${name} 完成订单 +${o.baseReward}🪙`);
+        break;
+      }
       case GameEvent.VEHICLE_PRODUCED: {
         const v = args[0] as Vehicle;
         const cfg = getVehicleConfig(v.tier);
         addLog(`🚗 新车出厂！${cfg?.emoji} ${v.name} [${getTraitName(v.trait)}]`);
-        addLog('💡 等几秒订单刷新后，点击「派车」让它去赚钱');
+        showToast(`🚗 新车出厂！`, `${cfg?.emoji} ${v.name} · ${getTraitName(v.trait)}`);
         showModal(`${cfg?.emoji} ${v.name}`, [
-          `品质: ${v.quality === 'gold' ? '🟡' : v.quality === 'blue' ? '🔵' : '⚪'}${v.quality}`,
-          `特质: ${getTraitName(v.trait)} ${v.trait === TraitType.Lucky ? '🔥稀有！' : ''}`,
+          `品质: ${v.quality === 'gold' ? '🟡传说' : v.quality === 'blue' ? '🔵精良' : '⚪白板'}`,
+          `特质: ${getTraitName(v.trait)} ${v.trait === TraitType.Lucky ? '🔥稀有' : ''}`,
           '',
           '给它起个名字吧！',
         ], '✏️ 取名', () => {
           const name = prompt('给这辆车起个名字：', v.name);
           if (name) gameLoop.getSystems().vehicleSys.nameVehicle(v.id, name);
         });
+        setTimeout(() => addLog('💡 等几秒订单刷新后，点击「派车」让它去赚钱'), 2000);
         break;
       }
       case GameEvent.VEHICLE_LEVEL_UP: {
         const v = args[0] as Vehicle;
-        addLog(`⬆ ${v.name} 升到 Lv.${v.level}！收入提升`);
+        showToast(`⬆ ${v.name} 升级！`, `现在 Lv.${v.level}，收入提升`);
+        addLog(`⬆ ${v.name} 升到 Lv.${v.level}！`);
         break;
       }
       case GameEvent.VEHICLE_EVOLVED: {
         const v = args[0] as Vehicle;
-        addLog(`🌟 ${v.name} 进化了！收入暴增！`);
-        showModal('🌟 进化成功！', [`${v.name} 完成了形态蜕变！`, '收入大幅提升，并获得专属天赋']);
+        showToast('🌟 进化成功！', `${v.name} 形态蜕变，收入暴增！`);
+        addLog(`🌟 ${v.name} 进化了！`);
+        showModal('🌟 进化成功！', [`${v.name} 完成了形态蜕变！`, '收入大幅提升，获得专属天赋']);
         break;
       }
       case GameEvent.RANDOM_EVENT_TRIGGERED: {
         const evt = args[0] as { name: string; description: string };
+        showToast(`🎲 ${evt.name}`, evt.description);
         addLog(`🎲 ${evt.name}: ${evt.description}`);
         break;
       }
       case GameEvent.ACHIEVEMENT_UNLOCKED: {
         const a = args[0] as { name: string };
+        showToast('🏆 成就解锁！', a.name);
         addLog(`🏆 成就解锁: ${a.name}`);
         showModal('🏆 成就解锁！', [a.name]);
-        break;
-      }
-      case GameEvent.ORDER_COMPLETED: {
-        const o = args[0] as Order;
-        const v = args[1] as Vehicle | undefined;
-        addLog(`✅ ${v ? v.name : '车辆'} 完成订单 +${o.baseReward}🪙`);
         break;
       }
       case GameEvent.GARAGE_EXPANDED: {
@@ -115,6 +191,7 @@ function bindEvents(): void {
       }
       case GameEvent.TECH_RESEARCHED: {
         addLog(`🔬 科技研究完成！新车型已解锁`);
+        showToast('🔬 科技研究完成', '新车型已解锁，快去造车吧！');
         break;
       }
     }
@@ -130,33 +207,25 @@ function getTraitName(trait: TraitType | null): string {
 // ==================== UI 绑定 ====================
 
 function bindUI(): void {
-  // 造车
   document.getElementById('btn-build')!.onclick = () => {
     const tier = parseInt((document.getElementById('build-tier-select') as HTMLSelectElement).value);
     const s = getState();
     const cfg = getVehicleConfig(tier);
     if (!cfg) return;
 
-    // 检查科技解锁
     const unlocked = getUnlockedConfigs(s.techTree.currentLevel, s.techTree.producedCount);
     if (!unlocked.find(c => c.tier === tier)) {
       addLog(`❌ T${tier} ${cfg.name} 还未解锁（需要先在🔬科技树中研究）`);
       return;
     }
-
-    // 检查车库空间
     if (s.garage.vehicles.length >= s.garage.maxCapacity) {
       addLog(`❌ 车库已满（${s.garage.maxCapacity} 格），请先扩建或送走一辆车`);
       return;
     }
-
-    // 检查金币
     if (s.resources.gold < cfg.buildCost) {
-      addLog(`❌ 金币不足！需要 ${cfg.buildCost}🪙，当前只有 ${s.resources.gold}🪙`);
+      addLog(`❌ 金币不足！需要 ${cfg.buildCost}🪙，当前 ${s.resources.gold}🪙`);
       return;
     }
-
-    // 检查零件
     if (s.resources.parts < cfg.partsCost) {
       addLog(`❌ 零件不足！需要 ${cfg.partsCost}⚙️`);
       return;
@@ -164,11 +233,10 @@ function bindUI(): void {
 
     const result = gameLoop.getSystems().vehicleSys.createVehicle(tier);
     if (result) {
-      addLog(`🔧 造了一辆${cfg.emoji}${cfg.name}，花费 ${cfg.buildCost}🪙`);
+      addLog(`🔧 造了一辆 ${cfg.emoji}${cfg.name}，花费 ${cfg.buildCost}🪙`);
     }
   };
 
-  // 扩建车库
   document.getElementById('btn-expand')!.onclick = () => {
     const ec = gameLoop.getSystems().economySys as any;
     if (ec.expandGarage()) {
@@ -178,13 +246,11 @@ function bindUI(): void {
       if (state.garage.maxCapacity >= GAME_CONSTANTS.GARAGE_MAX_CAPACITY) {
         addLog('🏠 车库已到最大容量（12 格）');
       } else {
-        const cost = ec.getNextExpandCost?.() ?? '?';
-        addLog(`❌ 金币不足，扩建需要 ${cost}🪙`);
+        addLog(`❌ 金币不足，扩建需要 ${ec.getNextExpandCost?.() ?? '?'}🪙`);
       }
     }
   };
 
-  // Tab 切换
   document.querySelectorAll('#bottombar button').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#bottombar button').forEach(b => b.classList.remove('active'));
@@ -197,7 +263,17 @@ function bindUI(): void {
     });
   });
 
-  // 生产
+  // 顶栏车辆状态图标点击切回车库
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('#vehicle-status-icons')) {
+      document.querySelectorAll('#bottombar button').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('visible'));
+      const garageBtn = document.querySelector('[data-tab="garage"]') as HTMLElement;
+      if (garageBtn) { garageBtn.classList.add('active'); currentTab = 'garage'; }
+    }
+  });
+
   document.getElementById('btn-start-prod')!.onclick = () => {
     const tier = parseInt((document.getElementById('prod-tier-select') as HTMLSelectElement).value);
     const line = gameLoop.getSystems().factorySys.getIdleLines()[0];
@@ -212,7 +288,6 @@ function bindUI(): void {
     }
   };
 
-  // 工厂升级
   document.getElementById('btn-upgrade-factory')!.onclick = () => {
     const fs = gameLoop.getSystems().factorySys;
     if ((fs as any).upgradeFactory()) {
@@ -232,6 +307,7 @@ function renderLoop(): void {
   renderFactory();
   renderTech();
   renderAchievements();
+  updateStatusIcons();
   requestAnimationFrame(renderLoop);
 }
 
@@ -239,18 +315,31 @@ function renderTopBar(): void {
   const s = getState();
   document.getElementById('gold')!.textContent = s.resources.gold.toLocaleString();
   document.getElementById('parts')!.textContent = s.resources.parts.toLocaleString();
-  document.getElementById('intimacy-sum')!.textContent = 
+  document.getElementById('intimacy-sum')!.textContent =
     s.garage.vehicles.reduce((sum, v) => sum + v.intimacy, 0).toString();
 
   const highestTier = s.garage.vehicles.length > 0
-    ? Math.max(...s.garage.vehicles.map(v => v.tier))
-    : 1;
+    ? Math.max(...s.garage.vehicles.map(v => v.tier)) : 1;
   const emojis = ['', '🛴', '🚲', '🐴', '🚗', '🚛', '🚂', '🚢', '✈️', '🚀', '🛸'];
   document.getElementById('tier-label')!.textContent = `${emojis[highestTier] || '🛴'} T${highestTier}`;
 
   const ec = gameLoop.getSystems().economySys as any;
   document.getElementById('eps')!.textContent = `${ec.getEstimatedEPS?.() ?? 0}/s`;
 }
+
+function updateStatusIcons(): void {
+  const s = getState();
+  const idle = s.garage.vehicles.filter(v => v.status === 'idle').length;
+  const busy = s.garage.vehicles.filter(v => v.status === 'on_order').length;
+  const container = document.getElementById('vehicle-status-icons');
+  if (container) {
+    container.innerHTML =
+      `<span class="status-icon" title="空闲车辆">🟢${idle}</span>` +
+      `<span class="status-icon" title="派单中">🚚${busy}</span>`;
+  }
+}
+
+// ==================== 车库渲染 ====================
 
 function renderGarage(): void {
   const s = getState();
@@ -269,16 +358,25 @@ function renderGarage(): void {
     const config = getVehicleConfig(v.tier);
     const card = document.createElement('div');
     card.className = `vehicle-card quality-${v.quality}`;
+
+    // 品质标签
+    const badge = v.quality === 'gold' ? '<span class="quality-badge gold-badge">传说</span>'
+      : v.quality === 'blue' ? '<span class="quality-badge blue-badge">精良</span>' : '';
+
+    const statusClass = v.status === 'idle' ? 'idle' : 'busy';
+    const statusText = v.status === 'idle' ? '✅ 空闲' : '🚚 派单中';
+    const traitName = getTraitName(v.trait);
+
     card.innerHTML = `
+      ${badge}
       <div class="emoji">${config?.emoji || '🚗'}</div>
       <div class="name">${v.name}</div>
-      <div class="info">
-        Lv.${v.level}/10 | ${v.quality === 'gold' ? '🟡' : v.quality === 'blue' ? '🔵' : '⚪'}
-        ${v.trait ? '| ' + getTraitName(v.trait) + (v.trait === TraitType.Lucky ? '<span class="badge rare">稀有</span>' : '') : ''}
+      <div style="text-align:center;margin:4px 0;">
+        Lv.${v.level}/10 ${v.isEvolved ? '🌟' : ''}
       </div>
-      <div class="info">${v.isEvolved ? '🌟 已进化 ' : ''}💖 ${v.intimacy}</div>
-      <div class="info">📦 ${v.ordersCompleted}单 | 🪙 ${v.totalEarnings.toLocaleString()}</div>
-      <div><span class="status status-${v.status}">${v.status === 'idle' ? '✅ 空闲' : v.status === 'on_order' ? '🚚 派单中' : v.status}</span></div>
+      <div class="info">${traitName} ${v.trait === TraitType.Lucky ? '<span class="badge rare">稀有</span>' : ''}</div>
+      <div class="info">💖${v.intimacy} · 📦${v.ordersCompleted}单</div>
+      <div style="text-align:center;margin-top:4px;"><span class="status-badge ${statusClass}">${statusText}</span></div>
     `;
     card.onclick = () => showVehicleDetail(v);
     grid.appendChild(card);
@@ -292,12 +390,12 @@ function showVehicleDetail(v: Vehicle): void {
   let detail = `
     <p>${config?.emoji} <strong>${v.name}</strong> · ${config?.name || 'T' + v.tier}</p>
     <p>📊 Lv.${v.level}/10 | 品质: ${v.quality === 'gold' ? '🟡传说' : v.quality === 'blue' ? '🔵精良' : '⚪白板'}</p>
-    <p>🧬 ${getTraitName(v.trait)} ${v.trait === TraitType.Lucky ? '🔥稀有' : ''}</p>
+    <p>🧬 特质: ${getTraitName(v.trait)} ${v.trait === TraitType.Lucky ? '🔥稀有' : ''}</p>
     <p>💖 亲密度 ${v.intimacy}/100</p>
     <p>🏎️速度 ${v.stats.speed}/5 · 📦载货 ${v.stats.cargo}/5 · 🔩耐久 ${v.stats.durability}/5</p>
     <p>📦 ${v.ordersCompleted}单 · 🪙 ${v.totalEarnings.toLocaleString()}</p>
-    <p>状态: ${v.status === 'idle' ? '✅ 空闲' : v.status === 'on_order' ? '🚚 执行订单中' : v.status}</p>
-    ${v.isEvolved ? '<p>🌟 已进化</p>' : v.quality === Quality.Gold && v.level >= GAME_CONSTANTS.MAX_VEHICLE_LEVEL && v.intimacy >= GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT ? '<p>✨ 可以进化！</p>' : ''}
+    <p>${v.status === 'idle' ? '✅ 空闲' : '🚚 执行订单中'}</p>
+    ${v.isEvolved ? '<p style="color:#f1c40f;">🌟 已进化 — 获得专属天赋：' + (config?.talentDesc || '') + '</p>' : v.quality === Quality.Gold && v.level >= GAME_CONSTANTS.MAX_VEHICLE_LEVEL && v.intimacy >= GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT ? '<p style="color:#f1c40f;font-weight:600;">✨ 可以进化！</p>' : ''}
   `;
 
   const buttons: (string | (() => void))[] = [];
@@ -308,7 +406,7 @@ function showVehicleDetail(v: Vehicle): void {
       const match = orders.find(o => sys.orderSys.canVehicleTakeOrder(v.id, o));
       if (match) {
         sys.orderSys.assignVehicle(match.id, v.id);
-        addLog(`📮 ${v.name} 已出发接单！`);
+        addLog(`📮 ${v.name} 出发接单！`);
         hideModal();
       } else {
         addLog('⚠️ 暂时没有适合该车的订单，等一会刷新');
@@ -319,7 +417,7 @@ function showVehicleDetail(v: Vehicle): void {
   if (v.quality !== Quality.Gold) {
     buttons.push('⬆ 提升品质', () => {
       if (sys.vehicleSys.upgradeQuality(v.id)) {
-        addLog(`⬆ ${v.name} 品质提升！`);
+        showToast('⬆ 品质提升！', `${v.name}: ${v.quality === 'blue' ? '⚪→🔵' : '🔵→🟡'}`);
         hideModal();
       } else {
         addLog('❌ 品质升级条件不足（需要完成订单数/金币/零件）');
@@ -327,13 +425,10 @@ function showVehicleDetail(v: Vehicle): void {
     });
   }
 
-  if (v.quality === Quality.Gold && v.level >= GAME_CONSTANTS.MAX_VEHICLE_LEVEL && v.intimacy >= GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT && !v.isEvolved) {
+  if (!v.isEvolved && v.quality === Quality.Gold && v.level >= GAME_CONSTANTS.MAX_VEHICLE_LEVEL && v.intimacy >= GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT) {
     buttons.push('🌟 进化', () => {
-      if (sys.vehicleSys.evolve(v.id)) {
-        hideModal();
-      } else {
-        addLog('❌ 进化失败');
-      }
+      if (sys.vehicleSys.evolve(v.id)) { hideModal(); }
+      else { addLog('❌ 进化失败'); }
     });
   }
 
@@ -346,18 +441,18 @@ function showVehicleDetail(v: Vehicle): void {
   showModal(`${config?.emoji} ${v.name}`, [detail], ...buttons);
 }
 
+// ==================== 订单渲染 ====================
+
 function renderOrders(): void {
   const container = document.getElementById('orders')!;
   const orders = gameLoop.getSystems().orderSys.getAvailableOrders().slice(0, 3);
-
   container.innerHTML = '';
 
   if (orders.length === 0) {
     const s = getState();
-    let msg = '⏳ 等待新订单...';
-    if (s.garage.vehicles.length === 0) {
-      msg = '🚗 先造一辆车，订单会自动出现 ↗';
-    }
+    const msg = s.garage.vehicles.length === 0
+      ? '🚗 先造一辆车，订单会自动出现 ↗'
+      : '⏳ 等待新订单...';
     container.innerHTML = `<div style="grid-column:1/-1;text-align:center;color:#555;padding:20px;font-size:13px;">${msg}</div>`;
     return;
   }
@@ -366,27 +461,36 @@ function renderOrders(): void {
     const div = document.createElement('div');
     div.className = 'order-card';
     const typeNames: Record<string, string> = { normal: '📮 普通配送', long_distance: '🏔️ 长途运输', valuable: '💎 贵重物品' };
-    const idleVehicles = getState().garage.vehicles.filter(v => v.status === 'idle' && gameLoop.getSystems().orderSys.canVehicleTakeOrder(v.id, o));
+    const idle = getState().garage.vehicles.filter(
+      v => v.status === 'idle' && gameLoop.getSystems().orderSys.canVehicleTakeOrder(v.id, o)
+    );
+
+    let vehicleInfo = '';
+    if (idle.length > 0) {
+      vehicleInfo = `🚗 ${idle.slice(0, 2).map(v => v.name).join(', ')}${idle.length > 2 ? ` +${idle.length - 2}` : ''}`;
+    } else {
+      vehicleInfo = '🔴 暂无空闲车辆';
+    }
 
     div.innerHTML = `
       <div class="type">${typeNames[o.type] || o.type}</div>
       <div class="reward">+${o.baseReward}🪙</div>
       <div style="font-size:11px;color:#888;">经验 ${o.expReward}</div>
-      <button id="dispatch-${o.id}" style="margin-top:6px;padding:4px 12px;border:none;border-radius:6px;background:#e94560;color:#fff;cursor:pointer;font-size:12px;">🚗 派车</button>
-      <div style="font-size:10px;color:#666;margin-top:3px;">${idleVehicles.length > 0 ? '🟢 有车可用' : '🔴 无空闲车辆'}</div>
+      <div style="font-size:11px;color:#aaa;margin:4px 0;">${vehicleInfo}</div>
+      <button style="margin-top:4px;padding:4px 14px;border:none;border-radius:6px;background:${idle.length > 0 ? '#e94560' : '#555'};color:#fff;cursor:${idle.length > 0 ? 'pointer' : 'not-allowed'};font-size:12px;">🚗 派车</button>
     `;
 
-    const btn = div.querySelector('button')!;
-    btn.onclick = () => {
-      const idle = getState().garage.vehicles.filter(
+    div.querySelector('button')!.onclick = () => {
+      const nowIdle = getState().garage.vehicles.filter(
         v => v.status === 'idle' && gameLoop.getSystems().orderSys.canVehicleTakeOrder(v.id, o)
       );
-      if (idle.length > 0) {
-        gameLoop.getSystems().orderSys.assignVehicle(o.id, idle[0].id);
-        addLog(`🚚 ${idle[0].name} 接了${typeNames[o.type] || ''}，预计 ${o.duration} 秒后完成`);
-        addLog(`💡 车跑订单的时候你可以去🔬研究科技或🏭搞生产`);
+      if (nowIdle.length > 0) {
+        gameLoop.getSystems().orderSys.assignVehicle(o.id, nowIdle[0].id);
+        showToast(`🚚 ${nowIdle[0].name} 接了订单`, `${typeNames[o.type] || ''} · ${o.duration}秒后完成`);
+        addLog(`🚚 ${nowIdle[0].name} 接了${typeNames[o.type] || ''}订单`);
       } else {
-        addLog('⚠️ 没有空闲车辆可以接这个订单（可能需要先造车或等车辆空闲）');
+        addLog('⚠️ 没有空闲车辆可接单');
+        showToast('⚠️ 派车失败', '没有空闲车辆');
       }
     };
 
@@ -394,10 +498,11 @@ function renderOrders(): void {
   });
 }
 
+// ==================== 工厂渲染 ====================
+
 function renderFactory(): void {
   const s = getState();
   document.getElementById('factory-level')!.textContent = s.factory.level.toString();
-
   const container = document.getElementById('factory-lines')!;
   container.innerHTML = '';
   s.factory.productionLines.forEach((line, i) => {
@@ -413,35 +518,50 @@ function renderFactory(): void {
   });
 }
 
+// ==================== 科技树渲染 ====================
+
 function renderTech(): void {
   const container = document.getElementById('tech-tree')!;
   container.innerHTML = '';
 
   const s = getState();
   const sys = gameLoop.getSystems().techSys;
+  const names = ['', '🔧 基础机械', '🔥 内燃机', '⚡ 自动化产线', '🌍 全球供应链', '🚀 星际物流'];
+  const costs = ['', '100🪙', '800🪙 + 10⚙️', '5,000🪙 + 50⚙️', '30,000🪙 + 200⚙️', '200,000🪙 + 1,000⚙️'];
+  const reqs = ['', '', '需先产 5 辆马车', '需先产 5 辆卡车', '需先产 3 艘轮船', '需先产 2 枚火箭'];
+
   for (let i = 1; i <= 5; i++) {
     const researched = s.techTree.isResearched[i - 1];
     const isCurrent = i === s.techTree.currentLevel + 1;
-    const next = i <= 5 ? sys.getNextResearchable() : null;
+    const next = sys.getNextResearchable();
 
     const div = document.createElement('div');
     div.className = 'tech-node';
-    div.classList.add(researched ? 'researched' : isCurrent ? 'available' : 'locked');
+    div.classList.add(researched ? 'researched' : isCurrent && next?.canAfford && next?.conditionMet ? 'available' : 'locked');
 
-    const names = ['', '🔧 基础机械', '🔥 内燃机', '⚡ 自动化产线', '🌍 全球供应链', '🚀 星际物流'];
-    const costs = ['', '100🪙', '800🪙 + 10⚙️\n需先产5辆马车', '5,000🪙 + 50⚙️\n需先产5辆卡车', '30,000🪙 + 200⚙️\n需先产3艘轮船', '200,000🪙 + 1,000⚙️\n需先产2枚火箭'];
+    let rightContent = '';
+    if (researched) {
+      rightContent = '✅ 已完成';
+    } else if (isCurrent && next) {
+      if (next.canAfford && next.conditionMet) {
+        rightContent = `<button class="research-btn">🔬 研究</button>`;
+      } else {
+        const reasons: string[] = [];
+        if (!next.conditionMet) reasons.push(reqs[i]);
+        if (!next.canAfford) reasons.push(costs[i]);
+        rightContent = `<span style="font-size:11px;color:#e94560;">❌ ${reasons.join(' ')}</span>`;
+      }
+    } else {
+      rightContent = '🔒 未解锁';
+    }
 
-    div.innerHTML = `
-      <span class="name">${researched ? '✅ ' : ''}${names[i]}</span>
-      <span class="cost">${researched ? '✅ 已完成' : isCurrent && next ? costs[i] : '🔒 未解锁'}</span>
-    `;
+    div.innerHTML = `<span class="name">${names[i]}</span><span class="cost">${rightContent}</span>`;
 
     if (isCurrent && next?.canAfford && next?.conditionMet) {
-      div.style.cursor = 'pointer';
-      div.title = '点击研究';
       div.onclick = () => {
         if (sys.researchNext()) {
-          addLog(`🔬 ${names[i]} 研究完成！新车型已解锁`);
+          showToast('🔬 研究完成', `${names[i]} — 新车型已解锁！`);
+          addLog(`🔬 ${names[i]} 研究完成！`);
         }
       };
     }
@@ -449,6 +569,8 @@ function renderTech(): void {
     container.appendChild(div);
   }
 }
+
+// ==================== 成就渲染 ====================
 
 function renderAchievements(): void {
   const s = getState();
@@ -512,6 +634,9 @@ function showModal(title: string, body: string[], ...buttons: (string | (() => v
 function hideModal(): void {
   document.getElementById('modal-overlay')!.classList.remove('visible');
 }
+
+// ==================== 顶栏状态图标容器 ====================
+// 在 index.html 的 topbar 中已预留
 
 // ==================== 启动 ====================
 
