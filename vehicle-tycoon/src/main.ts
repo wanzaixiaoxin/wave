@@ -475,9 +475,9 @@ function renderOrders(): void {
     div.innerHTML = `
       <div class="type">${typeNames[o.type] || o.type}</div>
       <div class="reward">+${o.baseReward}🪙</div>
-      <div style="font-size:11px;color:#888;">经验 ${o.expReward}</div>
-      <div style="font-size:11px;color:#aaa;margin:4px 0;">${vehicleInfo}</div>
-      <button style="margin-top:4px;padding:4px 14px;border:none;border-radius:6px;background:${idle.length > 0 ? '#e94560' : '#555'};color:#fff;cursor:${idle.length > 0 ? 'pointer' : 'not-allowed'};font-size:12px;">🚗 派车</button>
+      <div style="font-size:11px;color:#8a7a6a;">经验 ${o.expReward}</div>
+      <div class="vehicle-hint">${vehicleInfo}</div>
+      <button class="btn-dispatch ${idle.length > 0 ? 'active' : 'inactive'}">🚗 派车</button>
     `;
 
     div.querySelector('button')!.onclick = () => {
