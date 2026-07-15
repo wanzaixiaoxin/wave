@@ -3,18 +3,37 @@ reasonix.toml
 .reasonix/
 
 # Node.js
+vehicle-tycoon/node_modules/
 vehicle-tycoon/src/node_modules/
+
+# Build output
+vehicle-tycoon/dist/
+vehicle-tycoon/src/dist/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Build output
-vehicle-tycoon/src/dist/
-*.js.map
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# TypeScript
+*.tsbuildinfo
