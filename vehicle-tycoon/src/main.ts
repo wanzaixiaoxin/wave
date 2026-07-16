@@ -350,7 +350,7 @@ function renderGarage(): void {
   grid.innerHTML = '';
 
   if (s.garage.vehicles.length === 0) {
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#555;padding:30px;font-size:14px;">🅿️ 车库是空的<br><span style="font-size:12px;">点击「🔧 造车」造你的第一辆车</span></div>';
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:30px;font-size:14px;">🅿️ 车库是空的<br><span style="font-size:12px;">点击「🔧 造车」造你的第一辆车</span></div>';
     return;
   }
 
@@ -395,7 +395,7 @@ function showVehicleDetail(v: Vehicle): void {
     <p>🏎️速度 ${v.stats.speed}/5 · 📦载货 ${v.stats.cargo}/5 · 🔩耐久 ${v.stats.durability}/5</p>
     <p>📦 ${v.ordersCompleted}单 · 🪙 ${v.totalEarnings.toLocaleString()}</p>
     <p>${v.status === 'idle' ? '✅ 空闲' : '🚚 执行订单中'}</p>
-    ${v.isEvolved ? '<p style="color:#f1c40f;">🌟 已进化 — 获得专属天赋：' + (config?.talentDesc || '') + '</p>' : v.quality === Quality.Gold && v.level >= GAME_CONSTANTS.MAX_VEHICLE_LEVEL && v.intimacy >= GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT ? '<p style="color:#f1c40f;font-weight:600;">✨ 可以进化！</p>' : ''}
+    ${v.isEvolved ? '<p style="color:#D68910;">🌟 已进化 — 获得专属天赋：' + (config?.talentDesc || '') + '</p>' : v.quality === Quality.Gold && v.level >= GAME_CONSTANTS.MAX_VEHICLE_LEVEL && v.intimacy >= GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT ? '<p style="color:#D68910;font-weight:600;">✨ 可以进化！</p>' : ''}
   `;
 
   const buttons: (string | (() => void))[] = [];
@@ -453,7 +453,7 @@ function renderOrders(): void {
     const msg = s.garage.vehicles.length === 0
       ? '🚗 先造一辆车，订单会自动出现 ↗'
       : '⏳ 等待新订单...';
-    container.innerHTML = `<div style="grid-column:1/-1;text-align:center;color:#555;padding:20px;font-size:13px;">${msg}</div>`;
+    container.innerHTML = `<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:20px;font-size:13px;">${msg}</div>`;
     return;
   }
 
@@ -549,7 +549,7 @@ function renderTech(): void {
         const reasons: string[] = [];
         if (!next.conditionMet) reasons.push(reqs[i]);
         if (!next.canAfford) reasons.push(costs[i]);
-        rightContent = `<span style="font-size:11px;color:#e94560;">❌ ${reasons.join(' ')}</span>`;
+        rightContent = `<span style="font-size:11px;color:#C0392B;">❌ ${reasons.join(' ')}</span>`;
       }
     } else {
       rightContent = '🔒 未解锁';
@@ -582,7 +582,7 @@ function renderAchievements(): void {
   container.innerHTML = '';
   s.achievements.forEach(a => {
     const div = document.createElement('div');
-    div.style.cssText = 'padding:6px 10px;margin:4px 0;background:#0f3460;border-radius:6px;display:flex;justify-content:space-between;align-items:center;';
+    div.style.cssText = 'padding:6px 10px;margin:4px 0;background:var(--bg-warm);border-radius:6px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);';
     const sys = gameLoop.getSystems().achievementSys;
     const progress = Math.floor((sys as any).getProgress(a.id) * 100);
     div.innerHTML = `
@@ -623,7 +623,8 @@ function showModal(title: string, body: string[], ...buttons: (string | (() => v
 
   const closeBtn = document.createElement('button');
   closeBtn.textContent = '关闭';
-  closeBtn.style.background = '#555';
+  closeBtn.style.background = 'var(--bg-warm)';
+  closeBtn.style.color = 'var(--text-secondary)';
   closeBtn.onclick = hideModal;
   btnRow.appendChild(closeBtn);
 
