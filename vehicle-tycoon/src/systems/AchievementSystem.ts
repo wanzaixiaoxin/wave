@@ -69,14 +69,12 @@ export class AchievementSystem {
   constructor(state: GameState) {
     this.state = state;
 
-    // 初始化成就列表
-    if (state.achievements.length === 0) {
-      state.achievements = AchievementSystem.ACHIEVEMENT_DEFS.map(def => ({
-        ...def,
-        isUnlocked: false,
-        unlockedAt: null,
-      }));
-    }
+    // 初始化成就列表；旧存档缺少的新增成就按 id 补齐（保留已有解锁状态）
+    const existing = new Map(state.achievements.map(a => [a.id, a]));
+    state.achievements = AchievementSystem.ACHIEVEMENT_DEFS.map(def => {
+      const old = existing.get(def.id);
+      return old ?? { ...def, isUnlocked: false, unlockedAt: null };
+    });
   }
 
   // ==================== Tick（每秒检查） ====================

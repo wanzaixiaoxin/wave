@@ -13,6 +13,14 @@ export enum Quality {
 
 export const QUALITY_ORDER: Quality[] = [Quality.White, Quality.Blue, Quality.Gold];
 
+/**
+ * 品质数值等级（白=0 < 蓝=1 < 金=2）
+ * 注意：Quality 是字符串枚举，禁止直接用 < / > 比较（字典序下 'white' > 'blue'）
+ */
+export function qualityRank(quality: Quality): number {
+  return QUALITY_ORDER.indexOf(quality);
+}
+
 export enum VehicleStatus {
   Idle = 'idle',
   OnOrder = 'on_order',
@@ -174,16 +182,9 @@ export interface Order {
   expiresAt: number;
 }
 
-export interface ProductionOrder {
-  tier: number;
-  remainingTime: number;
-  isAutoSell: boolean;
-}
-
 export interface ProductionLine {
   index: number;
-  currentOrder: ProductionOrder | null;
-  queue: ProductionOrder[];
+  isActive: boolean;
 }
 
 export interface Factory {

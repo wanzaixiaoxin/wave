@@ -3,8 +3,8 @@
 // ============================================================
 
 import { EventBus } from './EventBus';
-import { GameEvent, SaveData, OfflineResult, GameState, VehicleConfigEntry, ChallengeRank } from './types';
-import { VEHICLE_CONFIGS } from '../config/VehicleConfig';
+import { GameEvent, SaveData, OfflineResult, GameState, ChallengeRank } from './types';
+import { GAME_CONSTANTS } from '../config/GameConstants';
 
 const SAVE_KEY = 'tycoon_save_v1';
 const SAVE_VERSION = '1.0';
@@ -57,7 +57,13 @@ export class SaveManager {
         console.warn('[SaveManager] Unknown save version, attempting migration');
       }
 
-      return data;
+      if (data.factory?.productionLines?.length > 0 && 'currentOrder' in data.factory.productionLines[0]) {
+        data.factory.productionLines = data.factory.productionLines.map((_: unknown, i: number) => ({
+          index: i,
+          isActive: true,
+        }));
+      }
+      return SaveManager.migrate(data);
     } catch (err) {
       console.error('[SaveManager] Load failed:', err);
       return null;
@@ -65,34 +71,42 @@ export class SaveManager {
   }
 
   /**
+   * 存档迁移：旧档缺失的顶层/嵌套字段用初始值补齐
+   * （防止版本升级后访问新字段崩溃）
+   */
+  private static migrate(data: SaveData): SaveData {
+    const defaults = SaveManager.createInitialState();
+    const merged = { ...defaults, ...data };
+    const nestedKeys = [
+      'resources', 'factory', 'garage', 'techTree',
+      'stats', 'prestige', 'challenge', 'settings',
+    ] as const;
+    for (const key of nestedKeys) {
+      if (data[key] && typeof data[key] === 'object') {
+        (merged as Record<string, unknown>)[key] = { ...defaults[key], ...data[key] };
+      }
+    }
+    return merged;
+  }
+
+  /**
    * 计算离线收益
    */
   static calculateOfflineEarnings(factory: GameState['factory'], offlineSeconds: number): OfflineResult {
     const effectiveSeconds = Math.min(offlineSeconds, MAX_OFFLINE_SECONDS);
-    const effectiveTicks = Math.floor(effectiveSeconds * OFFLINE_EFFICIENCY);
 
-    let totalGold = 0;
-    let totalParts = 0;
-    let totalCars = 0;
-
-    for (const line of factory.productionLines) {
-      if (line.currentOrder) {
-        const tier = line.currentOrder.tier;
-        const config = VEHICLE_CONFIGS.find(c => c.tier === tier);
-        if (config) {
-          const carsProduced = Math.floor(effectiveTicks / config.buildTime);
-          totalCars += carsProduced;
-          totalGold += carsProduced * config.basePrice;
-          totalParts += Math.floor(carsProduced * config.partsCost * 0.1);
-        }
-      }
-    }
+    const lineCount = factory.productionLines.filter(l => l.isActive).length;
+    const level = factory.level;
+    const baseRate = GAME_CONSTANTS.FACTORY_BASE_RATE;
+    const levelMult = 1 + (level - 1) * GAME_CONSTANTS.FACTORY_RATE_GROWTH;
+    const pps = lineCount * baseRate * levelMult;
+    const partsEarned = pps * effectiveSeconds * OFFLINE_EFFICIENCY;
 
     return {
       offlineSeconds: effectiveSeconds,
-      carsProduced: totalCars,
-      goldEarned: Math.floor(totalGold),
-      partsEarned: Math.floor(totalParts),
+      carsProduced: 0,
+      goldEarned: 0,
+      partsEarned: Math.floor(partsEarned),
     };
   }
 
@@ -100,11 +114,8 @@ export class SaveManager {
    * 应用离线收益到游戏状态
    */
   static applyOfflineEarnings(state: GameState, result: OfflineResult): void {
-    state.resources.gold += result.goldEarned;
     state.resources.parts += result.partsEarned;
-    state.stats.totalVehiclesProduced += result.carsProduced;
     state.stats.offlineTime += result.offlineSeconds;
-
     EventBus.emit(GameEvent.OFFLINE_EARNINGS, result);
   }
 
@@ -150,7 +161,7 @@ export class SaveManager {
   static createInitialState(): GameState {
     return {
       phase: 'playing',
-      resources: { gold: 100, parts: 0 },
+      resources: { gold: 200, parts: 0 },
       garage: {
         maxCapacity: 6,
         vehicles: [],
@@ -158,7 +169,7 @@ export class SaveManager {
       factory: {
         level: 1,
         productionLines: [
-          { index: 0, currentOrder: null, queue: [] },
+          { index: 0, isActive: true },
         ],
       },
       orders: [],

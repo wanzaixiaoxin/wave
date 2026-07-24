@@ -5,11 +5,11 @@
 import { EventBus } from '../core/EventBus';
 import {
   GameEvent, GameState, Order, OrderType, OrderStatus,
-  VehicleStatus, Quality
+  VehicleStatus, Quality, qualityRank
 } from '../core/types';
 import { getVehicleConfig } from '../config/VehicleConfig';
-import { getTraitConfig } from '../config/TraitConfig';
 import { GAME_CONSTANTS } from '../config/GameConstants';
+import { EconomySystem, getGlobalIncomeMult } from './EconomySystem';
 
 export class OrderSystem {
   private state: GameState;
@@ -19,6 +19,7 @@ export class OrderSystem {
   constructor(state: GameState) {
     this.state = state;
     this.orderIdCounter = state.orders.length;
+    this.orderGenTimer = 8; // 首次订单约 2 秒后出现
   }
 
   // ==================== Tick（每秒） ====================
@@ -34,13 +35,25 @@ export class OrderSystem {
       }
     }
 
-    // 检查订单过期
+    // 自动结算到期订单（先收集，避免遍历中修改数组）
     const now = Date.now();
+    const toComplete: string[] = [];
+    const toExpire: string[] = [];
+
     for (const order of this.state.orders) {
-      if (order.status === OrderStatus.Pending && now >= order.expiresAt) {
-        this.removeOrder(order.id);
+      if (order.status === OrderStatus.InProgress) {
+        const vehicle = this.state.garage.vehicles.find(v => v.id === order.assignedVehicleId);
+        // 车辆已被拆解/不存在，或时间已到 → 结算
+        if (!vehicle || (now >= vehicle.statusEndAt && vehicle.statusEndAt > 0)) {
+          toComplete.push(order.id);
+        }
+      } else if (order.status === OrderStatus.Pending && now >= order.expiresAt) {
+        toExpire.push(order.id);
       }
     }
+
+    toComplete.forEach(id => this.completeOrder(id));
+    toExpire.forEach(id => this.removeOrder(id));
   }
 
   // ==================== 生成订单 ====================
@@ -141,7 +154,7 @@ export class OrderSystem {
     if (order.requiredDurability && vehicle.stats.durability < order.requiredDurability) {
       return false;
     }
-    if (order.requiredQuality && vehicle.quality < order.requiredQuality) {
+    if (order.requiredQuality && qualityRank(vehicle.quality) < qualityRank(order.requiredQuality)) {
       return false;
     }
 
@@ -166,45 +179,26 @@ export class OrderSystem {
     const vehicle = this.state.garage.vehicles.find(v => v.id === order.assignedVehicleId);
 
     order.status = OrderStatus.Completed;
+    let totalReward = 0;
+    let isCrit = false;
+    let critMult = 1;
 
     if (vehicle) {
-      // 计算收入（含等级加成、品质加成、特质加成）
-      const levelMult = 1 + vehicle.level * 0.05;
-      const qualityMult = this.getQualityIncomeMult(vehicle.quality);
-      let totalReward = Math.floor(order.baseReward * levelMult * qualityMult);
-
-      // 特质加成
-      if (vehicle.trait) {
-        const traitConfig = getTraitConfig(vehicle.trait);
-        if (traitConfig?.effectType === 'income') {
-          totalReward = Math.floor(totalReward * traitConfig.effectValue);
-        }
-      }
-
-      // 暴击判定
-      const critRate = 0.05 + vehicle.stats.speed * 0.01;
-      let isCrit = Math.random() < critRate;
-      let critMult = GAME_CONSTANTS.CRIT_MULT_DEFAULT;
-
-      // 幸运特质：暴击×3
-      if (isCrit && vehicle.trait) {
-        const traitConfig = getTraitConfig(vehicle.trait);
-        if (traitConfig?.effectType === 'crit_mult') {
-          critMult = traitConfig.effectValue;
-        }
-      }
-
-      if (isCrit) {
-        totalReward = Math.floor(totalReward * critMult);
-      }
+      // 收入统一走 EconomySystem（等级/品质/特质/暴击 + 科技L5全局加成）
+      const result = EconomySystem.calculateOrderIncome(
+        vehicle, order.baseReward, 1.0, getGlobalIncomeMult(this.state)
+      );
+      totalReward = result.income;
+      isCrit = result.isCrit;
+      critMult = result.critMult;
 
       // 加金币
       this.state.resources.gold += totalReward;
       this.state.stats.totalGoldEarned += totalReward;
       this.state.stats.totalOrdersCompleted++;
 
-      // 加经验
-      vehicle.exp += order.expReward;
+      // 经验由 VehicleSystem 监听 ORDER_COMPLETED 后统一走 addExp() 处理
+      // （含特质/品质加成与升级判定），此处不再直接累加
       vehicle.ordersCompleted++;
       vehicle.totalEarnings += totalReward;
 
@@ -230,7 +224,7 @@ export class OrderSystem {
     }
 
     this.removeOrder(orderId);
-    EventBus.emit(GameEvent.ORDER_COMPLETED, order, vehicle);
+    EventBus.emit(GameEvent.ORDER_COMPLETED, order, vehicle, totalReward, isCrit, critMult);
     return true;
   }
 
@@ -244,7 +238,7 @@ export class OrderSystem {
     const vehicle = this.state.garage.vehicles.find(v => v.id === vehicleId);
     if (!vehicle || vehicle.status !== VehicleStatus.Idle) return false;
     if (order.requiredDurability && vehicle.stats.durability < order.requiredDurability) return false;
-    if (order.requiredQuality && vehicle.quality < order.requiredQuality) return false;
+    if (order.requiredQuality && qualityRank(vehicle.quality) < qualityRank(order.requiredQuality)) return false;
     return true;
   }
 
@@ -256,16 +250,8 @@ export class OrderSystem {
 
   private hasVehicleWithQuality(minQuality: Quality): boolean {
     return this.state.garage.vehicles.some(
-      v => v.status === VehicleStatus.Idle && v.quality >= minQuality
+      v => v.status === VehicleStatus.Idle && qualityRank(v.quality) >= qualityRank(minQuality)
     );
-  }
-
-  private getQualityIncomeMult(quality: Quality): number {
-    switch (quality) {
-      case Quality.White: return 1.0;
-      case Quality.Blue: return 1.5;
-      case Quality.Gold: return 2.0;
-    }
   }
 
   private removeOrder(orderId: string): void {

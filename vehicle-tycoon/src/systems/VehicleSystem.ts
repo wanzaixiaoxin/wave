@@ -5,7 +5,7 @@
 import { EventBus } from '../core/EventBus';
 import {
   GameEvent, GameState, Vehicle, VehicleStats,
-  Quality, QUALITY_ORDER, VehicleStatus, TraitType, TalentType
+  Quality, QUALITY_ORDER, VehicleStatus, TraitType, TalentType, Order
 } from '../core/types';
 import { getVehicleConfig } from '../config/VehicleConfig';
 import { rollTrait, getTraitConfig } from '../config/TraitConfig';
@@ -21,6 +21,15 @@ export class VehicleSystem {
   constructor(state: GameState) {
     this.state = state;
     this.vehicleIdCounter = state.garage.vehicles.length;
+
+    // 订单完成 → 统一走 addExp() 发放经验（含特质/品质加成与升级判定）
+    EventBus.on(GameEvent.ORDER_COMPLETED, (...args: unknown[]) => {
+      const order = args[0] as Order;
+      const vehicle = args[1] as Vehicle | undefined;
+      if (order && vehicle) {
+        this.addExp(vehicle.id, order.expReward);
+      }
+    });
   }
 
   // ==================== 创建车辆 ====================
@@ -96,7 +105,7 @@ export class VehicleSystem {
 
     vehicle.exp += exp;
 
-    while (vehicle.level < this.getMaxLevel(vehicle.quality)) {
+    while (vehicle.level < this.getMaxLevel(vehicle.quality, vehicle.isEvolved)) {
       const needed = expForLevel(vehicle.level);
       if (vehicle.exp >= needed) {
         vehicle.exp -= needed;
@@ -166,8 +175,8 @@ export class VehicleSystem {
     if (vehicle.level < GAME_CONSTANTS.MAX_VEHICLE_LEVEL) return false;
     if (vehicle.intimacy < GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT) return false;
 
+    // 进化只突破等级上限（getMaxLevel 对进化车 +5），不直接跳级
     vehicle.isEvolved = true;
-    vehicle.level = GAME_CONSTANTS.MAX_VEHICLE_LEVEL + 5;
     this.state.stats.totalEvolutions++;
 
     EventBus.emit(GameEvent.VEHICLE_EVOLVED, vehicle);
@@ -222,12 +231,14 @@ export class VehicleSystem {
     return this.state.garage.vehicles.find(v => v.id === vehicleId);
   }
 
-  getMaxLevel(quality: Quality): number {
+  getMaxLevel(quality: Quality, isEvolved = false): number {
+    let base: number;
     switch (quality) {
-      case Quality.White: return GAME_CONSTANTS.QUALITY_WHITE_MAX_LEVEL;
-      case Quality.Blue: return GAME_CONSTANTS.QUALITY_BLUE_MAX_LEVEL;
-      case Quality.Gold: return GAME_CONSTANTS.QUALITY_GOLD_MAX_LEVEL;
+      case Quality.White: base = GAME_CONSTANTS.QUALITY_WHITE_MAX_LEVEL; break;
+      case Quality.Blue: base = GAME_CONSTANTS.QUALITY_BLUE_MAX_LEVEL; break;
+      case Quality.Gold: base = GAME_CONSTANTS.QUALITY_GOLD_MAX_LEVEL; break;
     }
+    return isEvolved ? base + GAME_CONSTANTS.EVOLVED_LEVEL_BONUS : base;
   }
 
   getTalentType(tier: number): TalentType | undefined {

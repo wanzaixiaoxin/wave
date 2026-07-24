@@ -8,6 +8,15 @@ import { getVehicleConfig } from '../config/VehicleConfig';
 import { getTraitConfig } from '../config/TraitConfig';
 import { GAME_CONSTANTS, garageExpandCost } from '../config/GameConstants';
 
+/**
+ * 科技 L5 全厂收入倍率（唯一实现，OrderSystem / EconomySystem 共用）
+ */
+export function getGlobalIncomeMult(state: GameState): number {
+  return state.techTree.currentLevel >= 5
+    ? GAME_CONSTANTS.TECH_GLOBAL_INCOME_MULT
+    : 1.0;
+}
+
 export class EconomySystem {
   private state: GameState;
   private expandCount = 0;
@@ -41,14 +50,16 @@ export class EconomySystem {
   // ==================== 订单收入计算（静态方法，供外部使用） ====================
 
   /**
-   * 计算单次订单收入
+   * 计算单次订单收入（唯一的收入计算入口）
+   * @param rollCrit true=真实掷暴击（结算用）；false=按期望值折算（估算用，结果确定）
    */
   static calculateOrderIncome(
     vehicle: Vehicle,
     basePrice: number,
     orderTypeMult: number,
-    globalMult: number
-  ): { income: number; isCrit: boolean } {
+    globalMult: number,
+    rollCrit = true
+  ): { income: number; isCrit: boolean; critMult: number } {
     const levelMult = 1 + vehicle.level * 0.05;
 
     let qualityMult: number;
@@ -68,22 +79,30 @@ export class EconomySystem {
       }
     }
 
-    // 暴击判定
-    const critRate = 0.05 + vehicle.stats.speed * 0.01;
-    const isCrit = Math.random() < critRate;
-
-    if (isCrit) {
-      let critMult = GAME_CONSTANTS.CRIT_MULT_DEFAULT;
-      if (vehicle.trait) {
-        const tc = getTraitConfig(vehicle.trait);
-        if (tc?.effectType === 'crit_mult') {
-          critMult = tc.effectValue;
-        }
+    // 暴击（含「精准」特质暴击率加成）
+    let critRate = 0.05 + vehicle.stats.speed * 0.01;
+    let critMult = GAME_CONSTANTS.CRIT_MULT_DEFAULT;
+    if (vehicle.trait) {
+      const tc = getTraitConfig(vehicle.trait);
+      if (tc?.effectType === 'crit_rate') {
+        critRate += tc.effectValue;
       }
-      income = Math.floor(income * critMult);
+      if (tc?.effectType === 'crit_mult') {
+        critMult = tc.effectValue;
+      }
     }
 
-    return { income, isCrit };
+    if (rollCrit) {
+      const isCrit = Math.random() < critRate;
+      if (isCrit) {
+        income = Math.floor(income * critMult);
+      }
+      return { income, isCrit, critMult: isCrit ? critMult : 1 };
+    }
+
+    // 期望模式：按 暴击率 × (倍率-1) 折算额外收益，结果确定
+    income = Math.floor(income * (1 + critRate * (critMult - 1)));
+    return { income, isCrit: false, critMult: 1 };
   }
 
   // ==================== 统计查询 ====================
@@ -93,11 +112,13 @@ export class EconomySystem {
    */
   getEstimatedEPS(): number {
     let total = 0;
+    const globalMult = getGlobalIncomeMult(this.state);
     for (const v of this.state.garage.vehicles) {
       if (v.status !== 'idle') continue;
       const config = getVehicleConfig(v.tier);
       if (!config) continue;
-      const { income } = EconomySystem.calculateOrderIncome(v, config.basePrice, 1.0, 1.0);
+      // rollCrit=false → 期望模式，EPS 不再每秒随机跳动
+      const { income } = EconomySystem.calculateOrderIncome(v, config.basePrice, 1.0, globalMult, false);
       total += income / GAME_CONSTANTS.ORDER_NORMAL_DURATION;
     }
     return Math.floor(total);

@@ -16,11 +16,11 @@ import { SaveManager } from './SaveManager';
 
 export class GameLoop {
   private economyTickInterval: ReturnType<typeof setInterval> | null = null;
-  private renderLoopId: number | null = null;
+  private beforeUnloadHandler: (() => void) | null = null;
+  private visibilityHandler: (() => void) | null = null;
   private state: GameState;
   private isRunning = false;
   private lastTickTime = 0;
-  private accumulatedTime = 0;
 
   // 系统引用
   private vehicleSys!: VehicleSystem;
@@ -58,8 +58,13 @@ export class GameLoop {
     // 经济 tick：每秒一次
     this.economyTickInterval = setInterval(() => this.economyTick(), 1000);
 
-    // 渲染循环：60fps
-    this.renderLoop();
+    // 页面关闭/切后台时兜底存档（防止丢最近 30 秒进度）
+    this.beforeUnloadHandler = () => SaveManager.save(this.state);
+    this.visibilityHandler = () => {
+      if (document.visibilityState === 'hidden') SaveManager.save(this.state);
+    };
+    window.addEventListener('beforeunload', this.beforeUnloadHandler);
+    document.addEventListener('visibilitychange', this.visibilityHandler);
 
     // 自动存档
     SaveManager.startAutoSave(() => this.state, 30);
@@ -74,9 +79,13 @@ export class GameLoop {
       clearInterval(this.economyTickInterval);
       this.economyTickInterval = null;
     }
-    if (this.renderLoopId) {
-      cancelAnimationFrame(this.renderLoopId);
-      this.renderLoopId = null;
+    if (this.beforeUnloadHandler) {
+      window.removeEventListener('beforeunload', this.beforeUnloadHandler);
+      this.beforeUnloadHandler = null;
+    }
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
     }
 
     SaveManager.stopAutoSave();
@@ -106,18 +115,6 @@ export class GameLoop {
 
     // 发射全局 tick 事件（给 UI 层更新用）
     EventBus.emit(GameEvent.GAME_TICK, deltaMs);
-  }
-
-  // ==================== Render Loop (60fps) ====================
-
-  private renderLoop(): void {
-    if (!this.isRunning) return;
-
-    // 这里在实际 Cocos Creator 中由引擎驱动
-    // 当前架构预留渲染循环入口
-    // UIManager.update(deltaTime);
-
-    this.renderLoopId = requestAnimationFrame(() => this.renderLoop());
   }
 
   // ==================== 离线处理 ====================

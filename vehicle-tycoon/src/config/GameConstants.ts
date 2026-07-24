@@ -5,6 +5,7 @@
 export const GAME_CONSTANTS = {
   // ===== 等级 =====
   MAX_VEHICLE_LEVEL: 10,
+  EVOLVED_LEVEL_BONUS: 5,   // 进化后等级上限 +5
   EXP_BASE: 50,
   EXP_GROWTH: 1.5,          // 每级所需经验 = 50 × 1.5^(level-1)
 
@@ -70,6 +71,15 @@ export const GAME_CONSTANTS = {
   // ===== 离线 =====
   OFFLINE_MAX_SECONDS: 7200,     // 2小时
   OFFLINE_EFFICIENCY: 0.4,
+
+  // ===== 工厂 =====
+  FACTORY_MAX_LEVEL: 5,
+  FACTORY_BASE_RATE: 0.1,           // 基础零件/秒/每产线
+  FACTORY_RATE_GROWTH: 0.5,         // 每级 +50% 产出速率
+  FACTORY_UPGRADE_COSTS: [0, 500, 2000, 8000, 30000],
+  FACTORY_LINES_AT_LEVEL: [1, 1, 2, 2, 3], // 各级产线数
+  TECH_SPEED_BOOST: 0.25,           // 科技 L3+ 加速 +25%
+  TECH_GLOBAL_INCOME_MULT: 1.5,     // 科技 L5 全厂收入 ×1.5
 
   // ===== 轮回 =====
   PRESTIGE_GOLD_THRESHOLD: 10000000,

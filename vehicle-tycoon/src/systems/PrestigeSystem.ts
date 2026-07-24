@@ -134,14 +134,12 @@ export class PrestigeSystem {
     this.state.garage.maxCapacity = 6 + (bonuses.garageBonus ?? 0);
     this.state.factory.level = 1;
     this.state.factory.productionLines = [
-      { index: 0, currentOrder: null, queue: [] },
+      { index: 0, isActive: true },
     ];
-    // 加额外产线
     for (let i = 0; i < (bonuses.extraLines ?? 0); i++) {
       this.state.factory.productionLines.push({
         index: this.state.factory.productionLines.length,
-        currentOrder: null,
-        queue: [],
+        isActive: true,
       });
     }
     this.state.orders = [];

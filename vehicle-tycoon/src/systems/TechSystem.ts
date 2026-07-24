@@ -79,18 +79,13 @@ export class TechSystem {
         // 解锁 T4-T5（由 VehicleSystem 控制）
         break;
       case 3:
-        // 生产速度 +25%（在 FactorySystem 中实现）
+        // 工厂产出速度 +25%（FactorySystem.getPartsPerSecond 中实现）
         break;
       case 4:
-        // 产线 +1（已在升级时触发）
-        this.state.factory.productionLines.push({
-          index: this.state.factory.productionLines.length,
-          currentOrder: null,
-          queue: [],
-        });
+        // 工厂增加产线（FactorySystem 按等级自动管理）
         break;
       case 5:
-        // 全厂收入 +50%（在 OrderSystem 计算时实现）
+        // 全厂收入 +50%（预留，由 OrderSystem 计算时实现）
         break;
     }
   }
@@ -117,11 +112,12 @@ export class TechSystem {
   }
 
   /**
-   * 获取全厂收入倍率
+   * 获取全厂收入倍率（科技 L5 ×1.5）
+   * 注意：订单结算统一走 EconomySystem 模块的 getGlobalIncomeMult(state)
    */
   getGlobalIncomeMultiplier(): number {
     if (this.state.techTree.currentLevel >= 5) {
-      return GAME_CONSTANTS.QUALITY_INCOME_MULT_GOLD;
+      return GAME_CONSTANTS.TECH_GLOBAL_INCOME_MULT;
     }
     return 1.0;
   }
