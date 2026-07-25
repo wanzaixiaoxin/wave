@@ -112,7 +112,7 @@ export function renderTech(): void {
         const reasons: string[] = [];
         if (!next.conditionMet) reasons.push(cfg.unlockCondition);
         if (!next.canAfford) reasons.push(costText);
-        rightContent = `<span style="font-size:11px;color:#e94560;">❌ ${reasons.join(' ')}</span>`;
+        rightContent = `<span style="font-size:11px;color:var(--red);">❌ ${reasons.join(' ')}</span>`;
       }
     } else {
       rightContent = '🔒 未解锁';
@@ -147,11 +147,11 @@ export function renderAchievements(): void {
   const sys = getSystems().achievementSys;
   s.achievements.forEach(a => {
     const div = document.createElement('div');
-    div.style.cssText = 'padding:6px 10px;margin:4px 0;background:#0f3460;border-radius:6px;display:flex;justify-content:space-between;align-items:center;';
+    div.className = 'achieve-item';
     const progress = Math.floor(sys.getProgress(a.id) * 100);
     div.innerHTML = `
       <span>${a.isUnlocked ? '✅' : '⬜'} ${a.name}</span>
-      <span style="font-size:11px;color:#888;">${a.isUnlocked ? '✅ 已完成' : `${progress}%`}</span>
+      <span style="font-size:11px;color:var(--text-3);">${a.isUnlocked ? '✅ 已完成' : `${progress}%`}</span>
     `;
     container.appendChild(div);
   });

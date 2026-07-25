@@ -5,6 +5,20 @@
 import { EventBus } from '../core/EventBus';
 import { GameEvent, GameState, ActiveEvent } from '../core/types';
 
+/**
+ * 从游戏状态计算某类活跃事件的叠乘倍率（无事件时为 1）
+ * 静态纯函数，供 EconomySystem / OrderSystem 等无法持有 EventSystem 实例的场景使用
+ */
+export function getEventMultiplier(state: GameState, effectType: string): number {
+  let mult = 1.0;
+  for (const event of state.activeEvents) {
+    if (event.effectType === effectType) {
+      mult *= event.value;
+    }
+  }
+  return mult;
+}
+
 interface EventTemplate {
   id: string;
   name: string;
@@ -49,8 +63,8 @@ const EVENT_TEMPLATES: EventTemplate[] = [
     probability: 0.0025,
     effectType: 'parts_mult',
     effectValue: 3.0,
-    duration: 0,
-    description: '下一次获得零件 ×3',
+    duration: 30,
+    description: '30 秒内所有零件产出 ×3',
   },
   {
     id: 'speed_boost',
@@ -136,16 +150,12 @@ export class EventSystem {
         this.state.resources.gold += amount;
         break;
       }
-      case 'parts_mult': {
-        // 在下一次零件获取时应用（需在 OrderSystem 中检查 activeEvents）
-        break;
-      }
       case 'order_mult': {
-        // 在下一次生成订单时应用
+        // 大订单：由 OrderSystem 监听 RANDOM_EVENT_TRIGGERED 后生成高倍订单
         break;
       }
       case 'tech_boost': {
-        // 简化为金币奖励
+        // 科技是即时购买制无进度概念，简化为金币奖励
         this.state.resources.gold += 50;
         break;
       }
@@ -188,13 +198,7 @@ export class EventSystem {
    * 获取当前活跃事件的倍率
    */
   getActiveMultiplier(effectType: string): number {
-    let mult = 1.0;
-    for (const event of this.state.activeEvents) {
-      if (event.effectType === effectType) {
-        mult *= event.value;
-      }
-    }
-    return mult;
+    return getEventMultiplier(this.state, effectType);
   }
 
   getActiveEvents(): ActiveEvent[] {

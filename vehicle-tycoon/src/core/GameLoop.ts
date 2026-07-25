@@ -113,6 +113,11 @@ export class GameLoop {
     this.eventSys.tick(1);             // 随机事件判定
     this.achievementSys.tick();        // 成就判定
 
+    // 自动派单（设置开启时，每秒尝试把空闲车派给待接订单）
+    if (this.state.settings.autoCollectOrders) {
+      this.orderSys.autoAssign();
+    }
+
     // 发射全局 tick 事件（给 UI 层更新用）
     EventBus.emit(GameEvent.GAME_TICK, deltaMs);
   }
@@ -120,7 +125,7 @@ export class GameLoop {
   // ==================== 离线处理 ====================
 
   handleOfflineReturn(offlineSeconds: number): void {
-    const result = SaveManager.calculateOfflineEarnings(this.state.factory, offlineSeconds);
+    const result = SaveManager.calculateOfflineEarnings(this.state, offlineSeconds);
     SaveManager.applyOfflineEarnings(this.state, result);
   }
 

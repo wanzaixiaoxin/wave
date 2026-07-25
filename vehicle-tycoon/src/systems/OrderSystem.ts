@@ -5,11 +5,13 @@
 import { EventBus } from '../core/EventBus';
 import {
   GameEvent, GameState, Order, OrderType, OrderStatus,
-  VehicleStatus, Quality, qualityRank
+  VehicleStatus, Quality, qualityRank, TalentType, Specialization
 } from '../core/types';
 import { getVehicleConfig } from '../config/VehicleConfig';
+import { getTraitConfig } from '../config/TraitConfig';
 import { GAME_CONSTANTS } from '../config/GameConstants';
 import { EconomySystem, getGlobalIncomeMult } from './EconomySystem';
+import { getEventMultiplier } from './EventSystem';
 
 export class OrderSystem {
   private state: GameState;
@@ -20,6 +22,14 @@ export class OrderSystem {
     this.state = state;
     this.orderIdCounter = state.orders.length;
     this.orderGenTimer = 8; // 首次订单约 2 秒后出现
+
+    // 「大订单」事件：立即刷出一个 3 倍奖励的普通订单
+    EventBus.on(GameEvent.RANDOM_EVENT_TRIGGERED, (...args: unknown[]) => {
+      const payload = args[0] as { id?: string } | undefined;
+      if (payload?.id === 'big_order') {
+        this.generateOrder(3.0);
+      }
+    });
   }
 
   // ==================== Tick（每秒） ====================
@@ -27,10 +37,16 @@ export class OrderSystem {
   tick(deltaSeconds: number): void {
     this.orderGenTimer += deltaSeconds;
 
-    // 每 10-15 秒生成一个新订单
-    if (this.orderGenTimer >= 10 + Math.random() * 5) {
+    // 订单供给随进度扩张：生成间隔 5-8 秒（T8 飞机天赋 ×0.7），
+    // 待接单上限随科技等级提升（L1:3 → L3:4 → L5:5）
+    let genInterval = 3.5 + Math.random() * 2;
+    if (this.hasEvolvedTalent(TalentType.Network)) {
+      genInterval *= GAME_CONSTANTS.TALENT_NETWORK_REFRESH_MULT;
+    }
+    const maxPending = 3 + this.state.techTree.currentLevel;
+    if (this.orderGenTimer >= genInterval) {
       this.orderGenTimer = 0;
-      if (this.state.orders.filter(o => o.status === OrderStatus.Pending).length < 3) {
+      if (this.state.orders.filter(o => o.status === OrderStatus.Pending).length < maxPending) {
         this.generateOrder();
       }
     }
@@ -58,7 +74,7 @@ export class OrderSystem {
 
   // ==================== 生成订单 ====================
 
-  private generateOrder(): void {
+  private generateOrder(rewardMult = 1.0): void {
     const types = [OrderType.Normal, OrderType.LongDistance, OrderType.Valuable];
     const weights = [0.5, 0.3, 0.2];
     const rand = Math.random();
@@ -82,13 +98,20 @@ export class OrderSystem {
       type = OrderType.Normal;
     }
 
-    // 选一个随机 tier 作为订单基准
-    const availableTiers = this.state.garage.vehicles
-      .filter(v => v.status === VehicleStatus.Idle)
-      .map(v => v.tier);
-    const baseTier = availableTiers.length > 0
-      ? availableTiers[Math.floor(Math.random() * availableTiers.length)]
+    // 订单 tier 按车队最高战力定锚：在「最高 tier 及其下两级」内生成，
+    // 低 tier 垃圾单随进度自然淘汰（高 tier 车可以向下兼容接单）
+    const topTier = this.state.garage.vehicles.length > 0
+      ? Math.max(...this.state.garage.vehicles.map(v => v.tier))
       : 1;
+    const roll = Math.random();
+    let baseTier: number;
+    if (roll < 0.5 || topTier <= 1) {
+      baseTier = topTier;
+    } else if (roll < 0.8 || topTier <= 2) {
+      baseTier = topTier - 1;
+    } else {
+      baseTier = topTier - 2;
+    }
 
     const config = getVehicleConfig(baseTier);
     if (!config) return;
@@ -119,10 +142,14 @@ export class OrderSystem {
         break;
     }
 
+    // 高 tier 订单耗时更长（时间是最根本的抗膨胀货币）
+    duration = Math.round(duration * (1 + (baseTier - 1) * 0.08));
+
     const order: Order = {
       id: `o_${Date.now()}_${this.orderIdCounter++}`,
       type,
-      baseReward,
+      tier: baseTier,
+      baseReward: Math.floor(baseReward * rewardMult),
       expReward,
       duration,
       requiredDurability,
@@ -150,7 +177,8 @@ export class OrderSystem {
     if (order.status !== OrderStatus.Pending) return false;
     if (vehicle.status !== VehicleStatus.Idle) return false;
 
-    // 检查条件
+    // 检查条件：低 tier 车辆不能承接高 tier 订单
+    if (vehicle.tier < order.tier) return false;
     if (order.requiredDurability && vehicle.stats.durability < order.requiredDurability) {
       return false;
     }
@@ -161,7 +189,29 @@ export class OrderSystem {
     order.assignedVehicleId = vehicleId;
     order.status = OrderStatus.InProgress;
     vehicle.status = VehicleStatus.OnOrder;
-    vehicle.statusEndAt = Date.now() + order.duration * 1000;
+
+    // 订单耗时加成：速度属性每级 -4%、勤快特质 ×0.85、T1 天赋 ×0.8、
+    // 专精（快车 ×0.75 / 重载 ×1.15）、高磨损 ×1.2
+    let duration = order.duration;
+    duration *= 1 - vehicle.stats.speed * GAME_CONSTANTS.SPEED_DURATION_PER_LEVEL;
+    if (vehicle.trait) {
+      const tc = getTraitConfig(vehicle.trait);
+      if (tc?.effectType === 'speed') {
+        duration *= tc.effectValue;
+      }
+    }
+    if (vehicle.isEvolved && getVehicleConfig(vehicle.tier)?.talentType === TalentType.Agile) {
+      duration *= GAME_CONSTANTS.TALENT_AGILE_DURATION_MULT;
+    }
+    if (vehicle.specialization === Specialization.Express) {
+      duration *= GAME_CONSTANTS.SPEC_EXPRESS_DURATION_MULT;
+    } else if (vehicle.specialization === Specialization.Heavy) {
+      duration *= GAME_CONSTANTS.SPEC_HEAVY_DURATION_MULT;
+    }
+    if (vehicle.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD) {
+      duration *= GAME_CONSTANTS.WEAR_DURATION_MULT;
+    }
+    vehicle.statusEndAt = Date.now() + duration * 1000;
 
     EventBus.emit(GameEvent.ORDER_ASSIGNED, order, vehicle);
     return true;
@@ -184,9 +234,16 @@ export class OrderSystem {
     let critMult = 1;
 
     if (vehicle) {
-      // 收入统一走 EconomySystem（等级/品质/特质/暴击 + 科技L5全局加成）
+      // 疲劳重置：距上一单完成超过 30 秒，连续计数清零（在收入计算之前）
+      const now = Date.now();
+      if (now - vehicle.lastOrderCompletedAt > GAME_CONSTANTS.FATIGUE_RESET_SECONDS * 1000) {
+        vehicle.consecutiveOrders = 0;
+      }
+
+      // 收入统一走 EconomySystem（等级/品质/特质/载货/专精/进化/天赋/事件/磨损/疲劳 + 暴击 + 科技L5全局加成）
       const result = EconomySystem.calculateOrderIncome(
-        vehicle, order.baseReward, 1.0, getGlobalIncomeMult(this.state)
+        vehicle, order.baseReward, 1.0, getGlobalIncomeMult(this.state),
+        true, this.state, order.type
       );
       totalReward = result.income;
       isCrit = result.isCrit;
@@ -202,25 +259,48 @@ export class OrderSystem {
       vehicle.ordersCompleted++;
       vehicle.totalEarnings += totalReward;
 
-      // 加亲密度（完成订单少量增加）
+      // 加亲密度（完成订单的主要亲密度来源；双倍亲密度事件生效）
+      const intimacyGain = GAME_CONSTANTS.INTIMACY_ORDER_AMOUNT * getEventMultiplier(this.state, 'intimacy_mult');
       vehicle.intimacy = Math.min(
         GAME_CONSTANTS.MAX_INTIMACY,
-        vehicle.intimacy + 1
+        vehicle.intimacy + Math.floor(intimacyGain)
       );
 
-      // 零件产出
+      // 零件产出：收入 1% + tier 保底，叠加 T7/T9 天赋与零件雨事件
       const config = getVehicleConfig(vehicle.tier);
       if (config) {
-        let partsReward = Math.floor(totalReward * 0.01);
-        // 轮船天赋加成
-        if (vehicle.isEvolved && vehicle.tier === 7) {
-          partsReward = Math.floor(partsReward * 2);
+        let partsReward = Math.floor(totalReward * 0.01) + vehicle.tier;
+        if (vehicle.isEvolved) {
+          if (config.talentType === TalentType.Explorer) {
+            partsReward = Math.floor(partsReward * GAME_CONSTANTS.TALENT_EXPLORER_PARTS_MULT);
+          }
+          if (config.talentType === TalentType.Stellar) {
+            partsReward = Math.floor(partsReward * GAME_CONSTANTS.TALENT_STELLAR_PARTS_MULT);
+          }
         }
+        partsReward = Math.floor(partsReward * getEventMultiplier(this.state, 'parts_mult'));
         this.state.resources.parts += partsReward;
       }
 
       vehicle.status = VehicleStatus.Idle;
       vehicle.statusEndAt = 0;
+
+      // 磨损累积（稳健专精减半）与疲劳计数
+      const wearGain = GAME_CONSTANTS.WEAR_PER_ORDER *
+        (vehicle.specialization === Specialization.Steady ? GAME_CONSTANTS.SPEC_STEADY_WEAR_MULT : 1);
+      vehicle.wear = Math.min(GAME_CONSTANTS.WEAR_MAX, vehicle.wear + wearGain);
+      vehicle.consecutiveOrders++;
+      vehicle.lastOrderCompletedAt = now;
+
+      // T2 自行车天赋：完成订单后自动接下一个可接的待接订单
+      if (vehicle.isEvolved && config?.talentType === TalentType.Endurance) {
+        const next = this.getAvailableOrders()
+          .sort((a, b) => b.baseReward - a.baseReward)
+          .find(o => this.canVehicleTakeOrder(vehicle.id, o));
+        if (next) {
+          this.assignVehicle(next.id, vehicle.id);
+        }
+      }
     }
 
     this.removeOrder(orderId);
@@ -234,9 +314,42 @@ export class OrderSystem {
     return this.state.orders.filter(o => o.status === OrderStatus.Pending);
   }
 
+  /**
+   * 获取某辆车正在执行的订单（用于 UI 显示进度）
+   */
+  getInProgressOrder(vehicleId: string): Order | undefined {
+    return this.state.orders.find(
+      o => o.status === OrderStatus.InProgress && o.assignedVehicleId === vehicleId
+    );
+  }
+
+  /**
+   * 自动派单：贪心匹配（高价订单优先，派给能接的最低等级车，大车留给大单）
+   * @returns 成功派出的订单数
+   */
+  autoAssign(): number {
+    const pending = this.getAvailableOrders()
+      .sort((a, b) => b.baseReward - a.baseReward);
+
+    let assigned = 0;
+    for (const order of pending) {
+      const candidates = this.state.garage.vehicles
+        .filter(v => this.canVehicleTakeOrder(v.id, order))
+        .sort((a, b) => a.tier - b.tier); // 低 tier 优先，把高 tier 留给后面高价单
+      if (candidates.length > 0) {
+        if (this.assignVehicle(order.id, candidates[0].id)) {
+          assigned++;
+        }
+      }
+    }
+    return assigned;
+  }
+
   canVehicleTakeOrder(vehicleId: string, order: Order): boolean {
     const vehicle = this.state.garage.vehicles.find(v => v.id === vehicleId);
     if (!vehicle || vehicle.status !== VehicleStatus.Idle) return false;
+    // 低 tier 车辆不能承接高 tier 订单
+    if (vehicle.tier < order.tier) return false;
     if (order.requiredDurability && vehicle.stats.durability < order.requiredDurability) return false;
     if (order.requiredQuality && qualityRank(vehicle.quality) < qualityRank(order.requiredQuality)) return false;
     return true;
@@ -245,6 +358,15 @@ export class OrderSystem {
   private hasVehicleWithDurability(minDurability: number): boolean {
     return this.state.garage.vehicles.some(
       v => v.status === VehicleStatus.Idle && v.stats.durability >= minDurability
+    );
+  }
+
+  /**
+   * 车库中是否存在已进化且拥有指定天赋的车
+   */
+  private hasEvolvedTalent(talent: TalentType): boolean {
+    return this.state.garage.vehicles.some(
+      v => v.isEvolved && getVehicleConfig(v.tier)?.talentType === talent
     );
   }
 

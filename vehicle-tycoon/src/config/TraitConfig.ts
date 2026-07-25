@@ -18,7 +18,7 @@ export const TRAIT_CONFIGS: TraitConfigEntry[] = [
     name: '强壮',
     rarity: TraitRarity.Normal,
     effectType: 'cargo',
-    effectValue: 1.20,     // 载货 ×1.20
+    effectValue: 1.20,     // 收入 ×1.20
     probability: 0.17,
   },
   {

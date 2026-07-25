@@ -10,7 +10,7 @@ export function showFloatingGold(amount: number, isCrit = false): void {
   el.style.top = '45%';
   if (isCrit) {
     el.style.fontSize = '36px';
-    el.style.color = '#e94560';
+    el.style.color = 'var(--orange)';
     el.textContent = `💥 +${amount}🪙`;
   }
   document.body.appendChild(el);

@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke": "esbuild scripts/smoke.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/smoke.mjs --log-level=error && node node_modules/.cache/smoke.mjs",
+    "sim": "esbuild scripts/sim.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/sim.mjs --log-level=error && node node_modules/.cache/sim.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

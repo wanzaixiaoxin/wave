@@ -32,8 +32,8 @@ export class AchievementSystem {
     {
       id: 'all_rounder',
       name: '五维全能',
-      description: '同一辆车集满 5 级全属性',
-      condition: { type: 'produce_count', target: 5 }, // special check in tick()
+      description: '同一辆车的速度/载货/耐久全部升到 5 级',
+      condition: { type: 'stats_max', target: 15 },
       reward: { title: '全能选手' },
     },
     {
@@ -60,7 +60,7 @@ export class AchievementSystem {
     {
       id: 'rainbow_team',
       name: '彩虹战队',
-      description: '集齐 7 种不同性格特质的传说车',
+      description: '集齐 6 种不同性格特质的传说车',
       condition: { type: 'trait_collect', target: 6 },
       reward: { skin: '彩虹战队' },
     },
@@ -108,9 +108,19 @@ export class AchievementSystem {
         return this.state.garage.vehicles.filter(v => v.quality === 'gold').length >= condition.target;
 
       case 'trait_collect': {
-        const traits = new Set(this.state.garage.vehicles.map(v => v.trait).filter(Boolean));
+        const traits = new Set(
+          this.state.garage.vehicles
+            .filter(v => v.quality === 'gold')
+            .map(v => v.trait)
+            .filter(Boolean)
+        );
         return traits.size >= condition.target;
       }
+
+      case 'stats_max':
+        return this.state.garage.vehicles.some(
+          v => v.stats.speed + v.stats.cargo + v.stats.durability >= condition.target
+        );
 
       case 'profit_total':
         return this.state.stats.totalGoldEarned >= condition.target;
@@ -163,10 +173,21 @@ export class AchievementSystem {
         current = this.state.garage.vehicles.filter(v => v.quality === 'gold').length;
         break;
       case 'trait_collect': {
-        const traits = new Set(this.state.garage.vehicles.map(v => v.trait).filter(Boolean));
+        const traits = new Set(
+          this.state.garage.vehicles
+            .filter(v => v.quality === 'gold')
+            .map(v => v.trait)
+            .filter(Boolean)
+        );
         current = traits.size;
         break;
       }
+      case 'stats_max':
+        current = Math.max(
+          ...this.state.garage.vehicles.map(v => v.stats.speed + v.stats.cargo + v.stats.durability),
+          0
+        );
+        break;
       case 'profit_total': current = this.state.stats.totalGoldEarned; break;
       case 'order_count':
         current = Math.max(...this.state.garage.vehicles.map(v => v.ordersCompleted), 0);

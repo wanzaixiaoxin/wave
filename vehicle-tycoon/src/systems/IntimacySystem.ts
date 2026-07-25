@@ -5,6 +5,7 @@
 import { EventBus } from '../core/EventBus';
 import { GameEvent, GameState } from '../core/types';
 import { GAME_CONSTANTS } from '../config/GameConstants';
+import { getEventMultiplier } from './EventSystem';
 
 export class IntimacySystem {
   private state: GameState;
@@ -14,6 +15,13 @@ export class IntimacySystem {
 
   constructor(state: GameState) {
     this.state = state;
+  }
+
+  /**
+   * 「双倍亲密度」事件倍率（无事件时为 1）
+   */
+  private intimacyMult(): number {
+    return getEventMultiplier(this.state, 'intimacy_mult');
   }
 
   // ==================== 互动操作 ====================
@@ -32,7 +40,7 @@ export class IntimacySystem {
     this.lastWashTime[vehicleId] = now;
     vehicle.intimacy = Math.min(
       GAME_CONSTANTS.MAX_INTIMACY,
-      vehicle.intimacy + GAME_CONSTANTS.INTIMACY_WASH_AMOUNT
+      vehicle.intimacy + Math.floor(GAME_CONSTANTS.INTIMACY_WASH_AMOUNT * this.intimacyMult())
     );
 
     EventBus.emit(GameEvent.INTIMACY_CHANGED, vehicleId, vehicle.intimacy);
@@ -40,7 +48,7 @@ export class IntimacySystem {
   }
 
   /**
-   * 保养车辆（消耗零件）
+   * 保养车辆（消耗零件）：亲密度提升 + 磨损清零
    */
   repair(vehicleId: string): boolean {
     const now = Date.now();
@@ -56,9 +64,10 @@ export class IntimacySystem {
 
     this.state.resources.parts -= partsCost;
     this.lastRepairTime[vehicleId] = now;
+    vehicle.wear = 0; // 保养修复磨损
     vehicle.intimacy = Math.min(
       GAME_CONSTANTS.MAX_INTIMACY,
-      vehicle.intimacy + GAME_CONSTANTS.INTIMACY_REPAIR_AMOUNT
+      vehicle.intimacy + Math.floor(GAME_CONSTANTS.INTIMACY_REPAIR_AMOUNT * this.intimacyMult())
     );
 
     EventBus.emit(GameEvent.INTIMACY_CHANGED, vehicleId, vehicle.intimacy);
@@ -81,7 +90,7 @@ export class IntimacySystem {
     this.lastTapTime[vehicleId] = now;
     vehicle.intimacy = Math.min(
       GAME_CONSTANTS.MAX_INTIMACY,
-      vehicle.intimacy + GAME_CONSTANTS.INTIMACY_TAP_AMOUNT
+      vehicle.intimacy + Math.floor(GAME_CONSTANTS.INTIMACY_TAP_AMOUNT * this.intimacyMult())
     );
 
     EventBus.emit(GameEvent.INTIMACY_CHANGED, vehicleId, vehicle.intimacy);

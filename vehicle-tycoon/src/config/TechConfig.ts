@@ -19,8 +19,8 @@ export const TECH_CONFIGS: TechConfigEntry[] = [
     name: '内燃机',
     description: '解锁 T4-T5 车型，品质上限 +1',
     unlockCondition: '生产 5 辆 T3 马车',
-    goldCost: 800,
-    partsCost: 10,
+    goldCost: 1050,
+    partsCost: 30,
     effect: '解锁 T4-T5，品质上限从白板→精良',
   },
   {
@@ -28,8 +28,8 @@ export const TECH_CONFIGS: TechConfigEntry[] = [
     name: '自动化产线',
     description: '解锁 T6-T7 车型，生产速度 +25%',
     unlockCondition: '生产 5 辆 T5 卡车',
-    goldCost: 5000,
-    partsCost: 50,
+    goldCost: 6000,
+    partsCost: 100,
     effect: '解锁 T6-T7，所有生产耗时 ×0.75',
   },
   {
@@ -37,8 +37,8 @@ export const TECH_CONFIGS: TechConfigEntry[] = [
     name: '全球供应链',
     description: '解锁 T8-T9 车型，产线 +1',
     unlockCondition: '生产 3 辆 T7 轮船',
-    goldCost: 30000,
-    partsCost: 200,
+    goldCost: 18000,
+    partsCost: 400,
     effect: '解锁 T8-T9，产线数量 +1',
   },
   {
@@ -46,8 +46,8 @@ export const TECH_CONFIGS: TechConfigEntry[] = [
     name: '星际物流',
     description: '解锁 T10 星际飞船，全厂收入 +50%',
     unlockCondition: '生产 2 辆 T9 火箭',
-    goldCost: 200000,
-    partsCost: 1000,
+    goldCost: 80000,
+    partsCost: 1500,
     effect: '解锁 T10，所有车辆收入 ×1.5',
   },
 ];

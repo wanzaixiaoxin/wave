@@ -3,8 +3,10 @@
 // ============================================================
 
 import { EventBus } from './EventBus';
-import { GameEvent, SaveData, OfflineResult, GameState, ChallengeRank } from './types';
+import { GameEvent, SaveData, OfflineResult, GameState, ChallengeRank, OrderType, Vehicle } from './types';
 import { GAME_CONSTANTS } from '../config/GameConstants';
+import { getVehicleConfig } from '../config/VehicleConfig';
+import { EconomySystem, getGlobalIncomeMult } from '../systems/EconomySystem';
 
 const SAVE_KEY = 'tycoon_save_v1';
 const SAVE_VERSION = '1.0';
@@ -86,15 +88,29 @@ export class SaveManager {
         (merged as Record<string, unknown>)[key] = { ...defaults[key], ...data[key] };
       }
     }
+    // 老档车辆补齐新增字段（磨损/疲劳/专精）
+    if (merged.garage?.vehicles) {
+      merged.garage.vehicles = merged.garage.vehicles.map(v => ({
+        specialization: null,
+        wear: 0,
+        consecutiveOrders: 0,
+        lastOrderCompletedAt: 0,
+        ...(v as Partial<Vehicle>),
+      } as Vehicle));
+    }
     return merged;
   }
 
   /**
    * 计算离线收益
+   * 金币：按车库每辆车的期望订单收入折算（期望模式，无随机）
+   * 零件：按工厂产线速率折算
    */
-  static calculateOfflineEarnings(factory: GameState['factory'], offlineSeconds: number): OfflineResult {
+  static calculateOfflineEarnings(state: GameState, offlineSeconds: number): OfflineResult {
     const effectiveSeconds = Math.min(offlineSeconds, MAX_OFFLINE_SECONDS);
 
+    // 零件：产线持续产出
+    const factory = state.factory;
     const lineCount = factory.productionLines.filter(l => l.isActive).length;
     const level = factory.level;
     const baseRate = GAME_CONSTANTS.FACTORY_BASE_RATE;
@@ -102,10 +118,23 @@ export class SaveManager {
     const pps = lineCount * baseRate * levelMult;
     const partsEarned = pps * effectiveSeconds * OFFLINE_EFFICIENCY;
 
+    // 金币：车辆持续跑单（按期望收入 / 普通单时长估算 EPS）
+    const globalMult = getGlobalIncomeMult(state);
+    let eps = 0;
+    for (const v of state.garage.vehicles) {
+      const config = getVehicleConfig(v.tier);
+      if (!config) continue;
+      const { income } = EconomySystem.calculateOrderIncome(
+        v, config.basePrice, 1.0, globalMult, false, state, OrderType.Normal
+      );
+      eps += income / GAME_CONSTANTS.ORDER_NORMAL_DURATION;
+    }
+    const goldEarned = eps * effectiveSeconds * OFFLINE_EFFICIENCY;
+
     return {
       offlineSeconds: effectiveSeconds,
       carsProduced: 0,
-      goldEarned: 0,
+      goldEarned: Math.floor(goldEarned),
       partsEarned: Math.floor(partsEarned),
     };
   }
@@ -114,7 +143,9 @@ export class SaveManager {
    * 应用离线收益到游戏状态
    */
   static applyOfflineEarnings(state: GameState, result: OfflineResult): void {
+    state.resources.gold += result.goldEarned;
     state.resources.parts += result.partsEarned;
+    state.stats.totalGoldEarned += result.goldEarned;
     state.stats.offlineTime += result.offlineSeconds;
     EventBus.emit(GameEvent.OFFLINE_EARNINGS, result);
   }

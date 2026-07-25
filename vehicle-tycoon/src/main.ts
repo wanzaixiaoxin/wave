@@ -6,12 +6,12 @@
 import { GameLoop } from './core/GameLoop';
 import { EventBus } from './core/EventBus';
 import { SaveManager } from './core/SaveManager';
-import { GameEvent, GameState, Vehicle, Order } from './core/types';
+import { GameEvent, GameState, Vehicle, Order, OfflineResult } from './core/types';
 import { getVehicleConfig, getUnlockedConfigs } from './config/VehicleConfig';
 import { GAME_CONSTANTS } from './config/GameConstants';
 
 import { setGameLoop, setRenderFn, requestRender, getState, getSystems } from './ui/context';
-import { getTraitName } from './ui/format';
+import { getTraitName, pickRandomNames } from './ui/format';
 import { showToast } from './ui/toast';
 import { showFloatingGold, showCritEffect, goldBounce } from './ui/effects';
 import { showModal, hideModal } from './ui/modal';
@@ -34,21 +34,18 @@ let currentTab = 'garage';
 function init(): void {
   const saved = SaveManager.load();
   let state: GameState;
+  let offlineSeconds = 0;
   if (saved) {
     state = SaveManager.createInitialState();
     Object.assign(state, saved);
     if (state.resources.gold < 200) state.resources.gold = 200;
-    const offlineSeconds = Math.floor((Date.now() - saved.timestamp) / 1000);
+    offlineSeconds = Math.floor((Date.now() - saved.timestamp) / 1000);
     gameLoop = new GameLoop(state);
-    if (offlineSeconds > 10) {
-      gameLoop.handleOfflineReturn(offlineSeconds);
-      addLog(`📥 离线 ${Math.floor(offlineSeconds / 60)} 分钟归来，产线已自动收获`);
-    }
   } else {
     state = SaveManager.createInitialState();
     gameLoop = new GameLoop(state);
     addLog('🚗 欢迎来到造物运输大亨！');
-    addLog('💡 你有 200🪙，造一辆独轮车只要 5🪙，先造一辆试试！');
+    addLog('💡 你有 200🪙，造一辆独轮车只要 10🪙，先造一辆试试！');
   }
 
   // 注入 UI 上下文 + 渲染函数
@@ -56,7 +53,8 @@ function init(): void {
   setRenderFn(renderAll);
 
   bindTutorial();
-  startTutorial();
+  // 只有全新存档才触发新手引导（老玩家/中途退出者不重复弹）
+  if (!saved) startTutorial();
 
   // 点击弹窗外部关闭
   document.getElementById('modal-overlay')!.addEventListener('click', (e) => {
@@ -65,6 +63,13 @@ function init(): void {
 
   bindEvents();
   bindUI();
+
+  // 离线结算（放在 bindEvents 之后，OFFLINE_EARNINGS 弹窗才能收到事件）
+  if (offlineSeconds > 10) {
+    gameLoop.handleOfflineReturn(offlineSeconds);
+    addLog(`📥 离线 ${Math.floor(offlineSeconds / 60)} 分钟归来，车辆跑单与工厂产出已结算`);
+  }
+
   gameLoop.start();
 
   // 游戏 tick（1Hz）驱动刷新；用户操作后即时刷新
@@ -116,17 +121,12 @@ function bindEvents(): void {
       case GameEvent.VEHICLE_PRODUCED: {
         const v = args[0] as Vehicle;
         const cfg = getVehicleConfig(v.tier);
+        // 出厂自动随机命名（不打断流程），想改名在车辆详情里随时改
+        const taken = getState().garage.vehicles.map(x => x.name);
+        const autoName = pickRandomNames(1, taken)[0];
+        if (autoName) getSystems().vehicleSys.nameVehicle(v.id, autoName);
         addLog(`🚗 新车出厂！${cfg?.emoji} ${v.name} [${getTraitName(v.trait)}]`);
         showToast(`🚗 新车出厂！`, `${cfg?.emoji} ${v.name} · ${getTraitName(v.trait)}`);
-        showModal(`${cfg?.emoji} ${v.name}`, [
-          `品质: ${v.quality === 'gold' ? '🟡传说' : v.quality === 'blue' ? '🔵精良' : '⚪白板'}`,
-          `特质: ${getTraitName(v.trait)} ${v.trait === 'lucky' ? '🔥稀有' : ''}`,
-          '',
-          '给它起个名字吧！',
-        ], '✏️ 取名', () => {
-          const name = prompt('给这辆车起个名字：', v.name);
-          if (name) getSystems().vehicleSys.nameVehicle(v.id, name);
-        });
         setTimeout(() => addLog('💡 等几秒订单刷新后，点击「派车」让它去赚钱'), 2000);
         break;
       }
@@ -167,6 +167,17 @@ function bindEvents(): void {
       case GameEvent.TECH_RESEARCHED: {
         addLog(`🔬 科技研究完成！新车型已解锁`);
         showToast('🔬 科技研究完成', '新车型已解锁，快去造车吧！');
+        break;
+      }
+      case GameEvent.OFFLINE_EARNINGS: {
+        const r = args[0] as OfflineResult;
+        if (r.goldEarned > 0 || r.partsEarned > 0) {
+          showModal('📥 离线收益', [
+            `离线时长：${Math.floor(r.offlineSeconds / 60)} 分钟（按 40% 效率结算）`,
+            `🪙 金币 +${r.goldEarned.toLocaleString()}（车辆持续跑单）`,
+            `⚙️ 零件 +${r.partsEarned.toLocaleString()}（工厂持续产出）`,
+          ]);
+        }
         break;
       }
     }
@@ -263,11 +274,27 @@ function bindUI(): void {
   };
 
   document.getElementById('btn-settings')!.onclick = () => {
-    doResetGame();
+    openSettings();
   };
 }
 
 // ==================== 设置 / 重置 ====================
+
+function openSettings(): void {
+  const s = getState();
+  const autoOn = s.settings.autoCollectOrders;
+  showModal('⚙️ 设置', [
+    `自动派单：当前 ${autoOn ? '✅ 开启' : '❌ 关闭'}`,
+    '开启后，空闲车辆会自动接取待接订单（高价订单优先，大车留给大单）。',
+    '<span style="color:var(--red);font-weight:700;">⚠️ 重置游戏将清空所有进度，不可撤销。</span>',
+  ],
+    autoOn ? '🔴 关闭自动派单' : '🟢 开启自动派单', () => {
+      s.settings.autoCollectOrders = !autoOn;
+      addLog(`⚙️ 自动派单已${!autoOn ? '开启' : '关闭'}`);
+      showToast('⚙️ 设置已更新', `自动派单：${!autoOn ? '开启' : '关闭'}`);
+    },
+    '🗑️ 重置游戏', () => { doResetGame(); });
+}
 
 function doResetGame(): void {
   let stage = 0;
@@ -275,7 +302,7 @@ function doResetGame(): void {
     if (stage === 0) {
       showModal('⚙️ 设置', [
         '点击下方按钮可以清空所有游戏进度。',
-        '<span style="color:#e94560;font-weight:700;">⚠️ 此操作不可撤销，所有车辆、金币、零件、科技进度都将丢失。</span>',
+        '<span style="color:var(--red);font-weight:700;">⚠️ 此操作不可撤销，所有车辆、金币、零件、科技进度都将丢失。</span>',
       ], '🗑️ 我要重置游戏', () => { stage = 1; render(); });
     } else {
       showModal('⚠️ 最后确认', [

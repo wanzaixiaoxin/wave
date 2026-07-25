@@ -1,28 +1,42 @@
 // ============================================================
-// 新手引导 — 4 步遮罩教程，localStorage 记录完成状态
+// 新手引导 — 任务式 3 步：高亮真实按钮，等待玩家真实操作才推进
+// localStorage 记录完成状态
 // ============================================================
 
-const TUTORIAL_STEPS = [
+import { EventBus } from '../core/EventBus';
+import { GameEvent } from '../core/types';
+
+interface TutorialStep {
+  title: string;
+  desc: string;
+  /** 需要高亮的元素选择器（null = 不高亮） */
+  target: string | null;
+  /** 推进到下一步的触发事件（null = 只能手动点按钮） */
+  advanceOn: GameEvent | null;
+  /** 是否显示「下一步」按钮（用于可选操作步骤） */
+  manual: boolean;
+}
+
+const TUTORIAL_STEPS: TutorialStep[] = [
   {
     title: '🚗 造你的第一辆车',
-    desc: '点击下方「🔧 制造」按钮，从独轮车开始你的运输帝国！\n\n💡 造车需要消耗金币，独轮车只要 5🪙，你正好有 200🪙',
-  },
-  {
-    title: '✏️ 给它起个名字',
-    desc: '新车出厂后，给它起个名字吧！这是属于你的第一辆车 ❤️',
+    desc: '点击上方高亮的「🔧 制造」按钮，造一辆独轮车！\n\n💡 独轮车只要 10🪙，你正好有 200🪙',
+    target: '#btn-build',
+    advanceOn: GameEvent.VEHICLE_PRODUCED,
+    manual: false,
   },
   {
     title: '📮 派它去跑订单',
-    desc: '订单会自动刷新。点击订单上的「🚗 派车」，车就会出去赚钱！\n\n赚到的 🪙 可以用来造更好的车、研究科技',
-  },
-  {
-    title: '🔬 升级解锁新车',
-    desc: '赚够钱后去「🔬 科技」标签页研究内燃机，解锁小汽车！\n\n💡 科技的关联：车库≠工厂≠科技≠订单 四个模块协同运转',
+    desc: '订单会自动刷新（等几秒）。出现后点击订单上的「🚗 派车」，车就会出去赚钱！\n\n赚到的 🪙 可以造更好的车、研究🔬科技解锁新车型',
+    target: '#orders',
+    advanceOn: GameEvent.ORDER_ASSIGNED,
+    manual: false,
   },
 ];
 
 let tutorialStep = -1; // -1 = completed, 0+ = active step
 const TUTORIAL_KEY = 'tutorial_done_v2';
+let advanceHandler: (() => void) | null = null;
 
 export function startTutorial(): void {
   if (localStorage.getItem(TUTORIAL_KEY)) return;
@@ -35,10 +49,7 @@ export function resetTutorial(): void {
 }
 
 function showTutorialStep(step: number): void {
-  if (step >= TUTORIAL_STEPS.length) {
-    finishTutorial();
-    return;
-  }
+  clearStepHooks();
 
   const overlay = document.getElementById('tutorial-overlay');
   const stepEl = document.getElementById('tutorial-step');
@@ -51,8 +62,24 @@ function showTutorialStep(step: number): void {
   stepEl.textContent = `第 ${step + 1} 步 / 共 ${TUTORIAL_STEPS.length} 步`;
   titleEl.textContent = s.title;
   descEl.innerHTML = s.desc.replace(/\n/g, '<br>');
-  nextBtn.textContent = step < TUTORIAL_STEPS.length - 1 ? '下一步 →' : '开始游戏 🎮';
+  nextBtn.style.display = s.manual ? '' : 'none';
   overlay.classList.add('visible');
+
+  // 高亮目标元素
+  if (s.target) {
+    document.querySelector(s.target)?.classList.add('tutorial-highlight');
+  }
+
+  // 等待玩家真实操作推进（用 on/off 而非 once，保证跳过/换步时能正确移除）
+  if (s.advanceOn) {
+    const event = s.advanceOn;
+    advanceHandler = () => {
+      EventBus.off(event, advanceHandler!);
+      advanceHandler = null;
+      nextTutorialStep();
+    };
+    EventBus.on(event, advanceHandler);
+  }
 }
 
 function nextTutorialStep(): void {
@@ -66,17 +93,29 @@ function nextTutorialStep(): void {
 
 function finishTutorial(): void {
   tutorialStep = -1;
+  clearStepHooks();
   localStorage.setItem(TUTORIAL_KEY, '1');
   document.getElementById('tutorial-overlay')?.classList.remove('visible');
 }
 
 /**
- * 绑定引导相关按钮/遮罩事件（在 init 时调用一次）
+ * 清除当前步骤的高亮与事件监听
+ */
+function clearStepHooks(): void {
+  document.querySelectorAll('.tutorial-highlight').forEach(el => {
+    el.classList.remove('tutorial-highlight');
+  });
+  if (advanceHandler) {
+    const s = TUTORIAL_STEPS[tutorialStep];
+    if (s?.advanceOn) EventBus.off(s.advanceOn, advanceHandler);
+    advanceHandler = null;
+  }
+}
+
+/**
+ * 绑定引导相关按钮事件（在 init 时调用一次）
  */
 export function bindTutorial(): void {
   document.getElementById('tutorial-next')?.addEventListener('click', nextTutorialStep);
   document.getElementById('tutorial-skip')?.addEventListener('click', finishTutorial);
-  document.getElementById('tutorial-overlay')!.addEventListener('click', (e) => {
-    if (e.target === e.currentTarget && tutorialStep >= 0) nextTutorialStep();
-  });
 }

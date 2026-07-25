@@ -46,8 +46,8 @@ export enum TraitRarity {
 }
 
 export enum TraitType {
-  Quick = 'quick',       // 勤快：速度 +15%
-  Strong = 'strong',     // 强壮：载货 +20%
+  Quick = 'quick',       // 勤快：订单耗时 -15%
+  Strong = 'strong',     // 强壮：收入 +20%
   Precise = 'precise',   // 精准：暴击 +5%
   Smart = 'smart',       // 聪明：经验 +20%
   Lucky = 'lucky',       // 幸运：暴击 ×3（稀有）
@@ -57,7 +57,7 @@ export enum TraitType {
 export enum TalentType {
   Agile = 'agile',           // 独轮车: 速度 +20%
   Endurance = 'endurance',   // 自行车: 连续2单
-  Noble = 'noble',           // 马车: 高品质优先
+  Noble = 'noble',           // 马车: 长途/贵重单收入 +30%
   Speedster = 'speedster',   // 小汽车: 短途×2
   Hauler = 'hauler',         // 卡车: 收入+50%
   Convoy = 'convoy',         // 火车: 同型每辆+5%
@@ -145,9 +145,18 @@ export enum GameEvent {
 // ==================== 核心接口 ====================
 
 export interface VehicleStats {
-  speed: number;       // 0-5
-  cargo: number;       // 0-5
-  durability: number;  // 0-5
+  speed: number;       // 0-5，每级订单耗时 -4%
+  cargo: number;       // 0-5，每级收入 +4%
+  durability: number;  // 0-5，≥3 可接长途单
+}
+
+/**
+ * 车辆专精 — 蓝品质解锁，三选一，永久互斥
+ */
+export enum Specialization {
+  Express = 'express',   // 快车：耗时 -25%，收入 -10%
+  Heavy = 'heavy',       // 重载：收入 +25%，耗时 +15%
+  Steady = 'steady',     // 稳健：磨损减半，经验 +15%
 }
 
 export interface Vehicle {
@@ -161,6 +170,10 @@ export interface Vehicle {
   intimacy: number;                // 0-100
   stats: VehicleStats;
   isEvolved: boolean;
+  specialization: Specialization | null;
+  wear: number;                    // 磨损 0-100，≥70 收入 -30%、耗时 +20%
+  consecutiveOrders: number;       // 连续接单数（疲劳），空闲 30 秒重置
+  lastOrderCompletedAt: number;    // 0 = 从未完成过订单
   ordersCompleted: number;
   totalEarnings: number;
   createdAt: number;
@@ -171,6 +184,7 @@ export interface Vehicle {
 export interface Order {
   id: string;
   type: OrderType;
+  tier: number;                    // 订单等级（1-10），低 tier 车辆不能接高 tier 订单
   baseReward: number;
   expReward: number;
   duration: number;                // seconds
@@ -230,7 +244,7 @@ export interface Achievement {
 export interface AchievementCondition {
   type: 'produce_count' | 'evolve_count' | 'intimacy_max'
        | 'quality_count' | 'trait_collect' | 'profit_total'
-       | 'order_count' | 'prestige_count';
+       | 'order_count' | 'prestige_count' | 'stats_max';
   target: number;
   params?: Record<string, unknown>;
 }

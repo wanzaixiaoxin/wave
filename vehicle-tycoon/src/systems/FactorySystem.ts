@@ -1,6 +1,7 @@
 import { EventBus } from '../core/EventBus';
 import { GameEvent, GameState } from '../core/types';
 import { GAME_CONSTANTS } from '../config/GameConstants';
+import { getEventMultiplier } from './EventSystem';
 
 export class FactorySystem {
   private state: GameState;
@@ -10,8 +11,12 @@ export class FactorySystem {
   }
 
   tick(deltaSeconds: number): void {
+    // 「全员休息」事件：产线停产
+    if (getEventMultiplier(this.state, 'stop_production') !== 1.0) return;
+
     const pps = this.getPartsPerSecond();
-    const gained = pps * deltaSeconds;
+    // 「零件雨」事件：零件产出倍率
+    const gained = pps * deltaSeconds * getEventMultiplier(this.state, 'parts_mult');
     if (gained > 0) {
       this.state.resources.parts += gained;
     }
@@ -47,7 +52,9 @@ export class FactorySystem {
     const techBoost = this.state.techTree.currentLevel >= 3
       ? 1 + GAME_CONSTANTS.TECH_SPEED_BOOST
       : 1.0;
-    return lineCount * baseRate * levelMult * techBoost;
+    // 「加速光环」事件：产线速度倍率
+    const eventBoost = getEventMultiplier(this.state, 'speed_mult');
+    return lineCount * baseRate * levelMult * techBoost * eventBoost;
   }
 
   getLineCount(): number {

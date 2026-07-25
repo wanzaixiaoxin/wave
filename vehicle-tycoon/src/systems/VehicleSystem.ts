@@ -5,7 +5,8 @@
 import { EventBus } from '../core/EventBus';
 import {
   GameEvent, GameState, Vehicle, VehicleStats,
-  Quality, QUALITY_ORDER, VehicleStatus, TraitType, TalentType, Order
+  Quality, QUALITY_ORDER, qualityRank, VehicleStatus, TraitType, TalentType, Order,
+  Specialization
 } from '../core/types';
 import { getVehicleConfig } from '../config/VehicleConfig';
 import { rollTrait, getTraitConfig } from '../config/TraitConfig';
@@ -62,6 +63,10 @@ export class VehicleSystem {
       intimacy: 0,
       stats: { speed: 0, cargo: 0, durability: 0 },
       isEvolved: false,
+      specialization: null,
+      wear: 0,
+      consecutiveOrders: 0,
+      lastOrderCompletedAt: 0,
       ordersCompleted: 0,
       totalEarnings: 0,
       createdAt: Date.now(),
@@ -94,6 +99,11 @@ export class VehicleSystem {
     const traitConfig = getTraitConfig(vehicle.trait!);
     if (traitConfig?.effectType === 'exp') {
       exp = Math.floor(exp * traitConfig.effectValue);
+    }
+
+    // 稳健专精：经验 ×1.15
+    if (vehicle.specialization === 'steady') {
+      exp = Math.floor(exp * GAME_CONSTANTS.SPEC_STEADY_EXP_MULT);
     }
 
     const qualityExpMultMap: Record<Quality, number> = {
@@ -149,6 +159,22 @@ export class VehicleSystem {
     return true;
   }
 
+  // ==================== 专精 ====================
+
+  /**
+   * 选择专精（蓝品质解锁，三选一，永久不可更改）
+   */
+  specialize(vehicleId: string, spec: Specialization): boolean {
+    const vehicle = this.getVehicle(vehicleId);
+    if (!vehicle) return false;
+    if (vehicle.specialization) return false;
+    if (qualityRank(vehicle.quality) < qualityRank(Quality.Blue)) return false;
+
+    vehicle.specialization = spec;
+    EventBus.emit(GameEvent.VEHICLE_STATS_CHANGED, vehicle);
+    return true;
+  }
+
   // ==================== 属性升级 ====================
 
   upgradeStat(vehicleId: string, stat: keyof VehicleStats): boolean {
@@ -175,7 +201,10 @@ export class VehicleSystem {
     if (vehicle.level < GAME_CONSTANTS.MAX_VEHICLE_LEVEL) return false;
     if (vehicle.intimacy < GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT) return false;
 
-    // 进化只突破等级上限（getMaxLevel 对进化车 +5），不直接跳级
+    // 进化效果：
+    // 1. 等级上限 +5（getMaxLevel 对进化车生效）
+    // 2. 收入 ×3（EconomySystem.calculateOrderIncome 按 isEvolved 加成）
+    // 3. 车型专属天赋生效（收入/耗时/零件/刷新等，见 EconomySystem / OrderSystem）
     vehicle.isEvolved = true;
     this.state.stats.totalEvolutions++;
 
