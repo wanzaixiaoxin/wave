@@ -54,7 +54,31 @@ export class FactorySystem {
       : 1.0;
     // 「加速光环」事件：产线速度倍率
     const eventBoost = getEventMultiplier(this.state, 'speed_mult');
-    return lineCount * baseRate * levelMult * techBoost * eventBoost;
+    // 超负荷运转：限时产出倍率
+    const overclockBoost = Date.now() < this.state.factory.overclockUntil
+      ? GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT
+      : 1.0;
+    return lineCount * baseRate * levelMult * techBoost * eventBoost * overclockBoost;
+  }
+
+  // ==================== 超负荷运转 ====================
+
+  /** 激活超负荷：60 秒产出 ×2，之后进入 5 分钟冷却 */
+  activateOverclock(): boolean {
+    const now = Date.now();
+    if (now < this.state.factory.overclockCooldownUntil) return false;
+    this.state.factory.overclockUntil = now + GAME_CONSTANTS.FACTORY_OVERCLOCK_DURATION * 1000;
+    this.state.factory.overclockCooldownUntil = now + GAME_CONSTANTS.FACTORY_OVERCLOCK_COOLDOWN * 1000;
+    return true;
+  }
+
+  /** 超负荷状态：active=剩余激活秒数，cooldown=剩余冷却秒数 */
+  getOverclockState(): { active: number; cooldown: number } {
+    const now = Date.now();
+    return {
+      active: Math.max(0, (this.state.factory.overclockUntil - now) / 1000),
+      cooldown: Math.max(0, (this.state.factory.overclockCooldownUntil - now) / 1000),
+    };
   }
 
   getLineCount(): number {

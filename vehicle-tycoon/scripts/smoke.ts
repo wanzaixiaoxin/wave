@@ -6,7 +6,10 @@ import { EconomySystem, getGlobalIncomeMult, getTalentIncomeMult } from '../src/
 import { EventSystem } from '../src/systems/EventSystem';
 import { AchievementSystem } from '../src/systems/AchievementSystem';
 import { Quality, OrderType, TalentType, TraitType, VehicleStatus, OrderStatus, Specialization } from '../src/core/types';
-import { GAME_CONSTANTS } from '../src/config/GameConstants';
+import { GAME_CONSTANTS, cumulativeExpForLevel } from '../src/config/GameConstants';
+import { getVehicleConfig } from '../src/config/VehicleConfig';
+import { FactorySystem } from '../src/systems/FactorySystem';
+import { TechSystem, getEffectivePartsCost } from '../src/systems/TechSystem';
 import { IntimacySystem } from '../src/systems/IntimacySystem';
 
 let failures = 0;
@@ -186,6 +189,67 @@ check('首次专精成功', vehicleSys.specialize(v.id, Specialization.Steady));
 check('专精不可更改', !vehicleSys.specialize(v.id, Specialization.Express));
 v.quality = Quality.White;
 v.specialization = null;
+
+// 21. 拆解传承：累计经验按比例入池，下一辆新车落地继承
+const donor = vehicleSys.createVehicle(1)!;
+donor.trait = null;
+vehicleSys.addExp(donor.id, cumulativeExpForLevel(4));
+const donorLifetime = cumulativeExpForLevel(donor.level) + donor.exp;
+const expectedPool = Math.floor(donorLifetime * GAME_CONSTANTS.INHERIT_EXP_RATIO);
+const poolBefore = state.garage.inheritanceExp;
+vehicleSys.scrapVehicle(donor.id);
+check('拆解经验入传承池', state.garage.inheritanceExp - poolBefore === expectedPool,
+  `delta=${state.garage.inheritanceExp - poolBefore} expect=${expectedPool}`);
+const heir = vehicleSys.createVehicle(1)!;
+check('新车继承传承经验', heir.level > 1 && state.garage.inheritanceExp === 0,
+  `level=${heir.level} pool=${state.garage.inheritanceExp}`);
+
+// 22. 工厂超负荷运转：产出 ×2，冷却期不可重复激活
+const factorySys = new FactorySystem(state);
+const ppsBefore = factorySys.getPartsPerSecond();
+check('超负荷激活成功', factorySys.activateOverclock());
+const ppsOc = factorySys.getPartsPerSecond();
+check('超负荷产出 ×2', Math.abs(ppsOc / ppsBefore - GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT) < 0.01,
+  `before=${ppsBefore} oc=${ppsOc}`);
+check('冷却中不可重复激活', !factorySys.activateOverclock());
+
+// 23. 辅助科技：等级门槛、研究、折扣、传承加成、回收加成
+const techSys = new TechSystem(state);
+state.resources.gold = 10_000_000;
+state.resources.parts = 1_000_000;
+check('主线不足不能研究支线', !techSys.researchSideTech('archive')); // 需要 L3，当前 L1
+state.techTree.currentLevel = 3;
+check('研究精益制造', techSys.researchSideTech('lean_mfg'));
+check('重复研究被拒', !techSys.researchSideTech('lean_mfg'));
+check('精益制造零件折扣 ×0.75', getEffectivePartsCost(state, 100) === 75);
+check('研究技术档案', techSys.researchSideTech('archive'));
+
+const donor2 = vehicleSys.createVehicle(1)!;
+donor2.trait = null;
+vehicleSys.addExp(donor2.id, cumulativeExpForLevel(3));
+const lifetime2 = cumulativeExpForLevel(donor2.level) + donor2.exp;
+const expected2 = Math.floor(lifetime2 * (GAME_CONSTANTS.INHERIT_EXP_RATIO + GAME_CONSTANTS.SIDE_ARCHIVE_INHERIT_BONUS));
+const poolB2 = state.garage.inheritanceExp;
+vehicleSys.scrapVehicle(donor2.id);
+check('技术档案传承比例 0.65', state.garage.inheritanceExp - poolB2 === expected2,
+  `delta=${state.garage.inheritanceExp - poolB2} expect=${expected2}`);
+
+check('研究回收工艺', techSys.researchSideTech('recycling'));
+const donor3 = vehicleSys.createVehicle(1)!;
+const goldB3 = state.resources.gold;
+const t1BuildCost = getVehicleConfig(1)!.buildCost;
+vehicleSys.scrapVehicle(donor3.id);
+check('回收工艺拆解返还 50%', state.resources.gold - goldB3 === Math.floor(t1BuildCost * GAME_CONSTANTS.SIDE_RECYCLING_SCRAP_GOLD),
+  `delta=${state.resources.gold - goldB3} expect=${Math.floor(t1BuildCost * 0.5)}`);
+
+// 24. 新成就条件：科技/工厂/支线
+const achieveSys = new AchievementSystem(state);
+state.techTree.currentLevel = 5;
+state.factory.level = 10;
+achieveSys.tick();
+check('科技巅峰成就解锁', !!state.achievements.find(a => a.id === 'tech_max')?.isUnlocked);
+check('工业巨擘成就解锁', !!state.achievements.find(a => a.id === 'factory_max')?.isUnlocked);
+check('博采众长成就解锁', !!state.achievements.find(a => a.id === 'side_tech_2')?.isUnlocked);
 
 console.log(failures === 0 ? '\n全部通过 🎉' : `\n${failures} 项失败`);
 process.exit(failures === 0 ? 0 : 1);

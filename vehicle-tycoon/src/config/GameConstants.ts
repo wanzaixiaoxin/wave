@@ -64,6 +64,7 @@ export const GAME_CONSTANTS = {
 
   // ===== 继承概率 =====
   TRAIT_INHERIT_CHANCE: 0.25,
+  INHERIT_EXP_RATIO: 0.5,           // 拆解时累计经验存入传承池的比例（下一辆新车继承）
 
   // ===== 进化与天赋 =====
   EVOLVED_INCOME_MULT: 3.0,        // 进化后收入 ×3
@@ -106,13 +107,22 @@ export const GAME_CONSTANTS = {
   OFFLINE_EFFICIENCY: 0.4,
 
   // ===== 工厂 =====
-  FACTORY_MAX_LEVEL: 5,
+  FACTORY_MAX_LEVEL: 10,
   FACTORY_BASE_RATE: 0.2,           // 基础零件/秒/每产线
   FACTORY_RATE_GROWTH: 0.75,        // 每级 +75% 产出速率
-  FACTORY_UPGRADE_COSTS: [0, 500, 2000, 8000, 30000],
-  FACTORY_LINES_AT_LEVEL: [1, 1, 2, 2, 3], // 各级产线数
+  FACTORY_UPGRADE_COSTS: [0, 500, 2000, 8000, 30000, 80000, 200000, 500000, 1200000, 3000000],
+  FACTORY_LINES_AT_LEVEL: [1, 1, 2, 2, 3, 3, 4, 4, 5, 6], // 各级产线数
+  FACTORY_OVERCLOCK_MULT: 2.0,      // 超负荷运转：产出 ×2
+  FACTORY_OVERCLOCK_DURATION: 60,   // 持续 60 秒
+  FACTORY_OVERCLOCK_COOLDOWN: 300,  // 冷却 5 分钟
   TECH_SPEED_BOOST: 0.25,           // 科技 L3+ 加速 +25%
   TECH_GLOBAL_INCOME_MULT: 1.5,     // 科技 L5 全厂收入 ×1.5
+
+  // ===== 辅助科技（支线）效果 =====
+  SIDE_LOGISTICS_INTERVAL_MULT: 0.8,  // 物流优化：订单生成间隔 ×0.8
+  SIDE_LEAN_PARTS_MULT: 0.75,         // 精益制造：造车零件消耗 ×0.75
+  SIDE_ARCHIVE_INHERIT_BONUS: 0.15,   // 技术档案：传承比例 +15 个百分点
+  SIDE_RECYCLING_SCRAP_GOLD: 0.5,     // 回收工艺：拆解金币返还 30%→50%
 
   // ===== 轮回 =====
   PRESTIGE_GOLD_THRESHOLD: 10000000,

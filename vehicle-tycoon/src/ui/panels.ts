@@ -4,7 +4,8 @@
 
 import { getState, getSystems, requestRender } from './context';
 import { getUnlockedConfigs } from '../config/VehicleConfig';
-import { TECH_CONFIGS } from '../config/TechConfig';
+import { TECH_CONFIGS, SIDE_TECH_CONFIGS } from '../config/TechConfig';
+import { GAME_CONSTANTS } from '../config/GameConstants';
 import { showToast } from './toast';
 import { addLog } from './log';
 
@@ -24,6 +25,9 @@ export function renderTopBar(): void {
 
   const ec = getSystems().economySys;
   document.getElementById('eps')!.textContent = `${ec.getEstimatedEPS()}/s`;
+
+  const poolEl = document.getElementById('inherit-pool');
+  if (poolEl) poolEl.textContent = Math.floor(s.garage.inheritanceExp).toLocaleString();
 }
 
 export function updateStatusIcons(): void {
@@ -74,6 +78,37 @@ export function renderFactory(): void {
   const costEl = document.getElementById('factory-upgrade-cost');
   if (costEl) {
     costEl.textContent = cost > 0 ? cost.toLocaleString() : 'MAX';
+  }
+
+  // 下一级收益预览（不含事件/超负荷临时加成）
+  const nextEl = document.getElementById('factory-next-info');
+  if (nextEl) {
+    if (cost > 0) {
+      const lines = GAME_CONSTANTS.FACTORY_LINES_AT_LEVEL;
+      const nextLines = lines[Math.min(s.factory.level, lines.length - 1)];
+      const nextMult = 1 + s.factory.level * GAME_CONSTANTS.FACTORY_RATE_GROWTH;
+      const techBoost = s.techTree.currentLevel >= 3 ? 1 + GAME_CONSTANTS.TECH_SPEED_BOOST : 1.0;
+      const nextPps = nextLines * GAME_CONSTANTS.FACTORY_BASE_RATE * nextMult * techBoost;
+      nextEl.textContent = `下一级：${nextLines} 条产线 · ${nextPps.toFixed(2)}⚙️/秒`;
+    } else {
+      nextEl.textContent = '🏭 工厂已满级';
+    }
+  }
+
+  // 超负荷按钮状态（激活倒计时 / 冷却倒计时 / 可用）
+  const ocBtn = document.getElementById('btn-overclock') as HTMLButtonElement | null;
+  if (ocBtn) {
+    const oc = fs.getOverclockState();
+    if (oc.active > 0) {
+      ocBtn.textContent = `⚡ 超负荷中 ${Math.ceil(oc.active)}s`;
+      ocBtn.disabled = true;
+    } else if (oc.cooldown > 0) {
+      ocBtn.textContent = `⏳ 冷却 ${Math.ceil(oc.cooldown)}s`;
+      ocBtn.disabled = true;
+    } else {
+      ocBtn.textContent = `⚡ 超负荷 ×${GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT} (${GAME_CONSTANTS.FACTORY_OVERCLOCK_DURATION}s)`;
+      ocBtn.disabled = false;
+    }
   }
 }
 
@@ -132,6 +167,45 @@ export function renderTech(): void {
 
     container.appendChild(div);
   }
+
+  // ---------- 辅助科技（支线，独立研究，永久被动） ----------
+  const sideContainer = document.getElementById('side-tech-tree');
+  if (sideContainer) {
+    sideContainer.innerHTML = '';
+    for (const cfg of SIDE_TECH_CONFIGS) {
+      const st = sys.getSideTechState(cfg.id);
+      const costText = `${cfg.goldCost.toLocaleString()}🪙 + ${cfg.partsCost}⚙️`;
+
+      const div = document.createElement('div');
+      div.className = 'tech-node';
+      div.classList.add(st.researched ? 'researched' : st.levelMet && st.canAfford ? 'available' : 'locked');
+
+      let right = '';
+      if (st.researched) {
+        right = '✅ 已完成';
+      } else if (!st.levelMet) {
+        right = `<span style="font-size:11px;color:var(--text-3);">🔒 需要科技 Lv.${cfg.requiredLevel}</span>`;
+      } else if (st.canAfford) {
+        right = `<button class="research-btn">🧪 研究</button>`;
+      } else {
+        right = `<span style="font-size:11px;color:var(--red);">❌ ${costText}</span>`;
+      }
+
+      div.innerHTML = `<span class="name">${cfg.name}<span style="display:block;font-size:10px;color:var(--text-3);font-weight:600;">${cfg.description}</span></span><span class="cost">${right}</span>`;
+
+      if (!st.researched && st.levelMet && st.canAfford) {
+        div.onclick = () => {
+          if (sys.researchSideTech(cfg.id)) {
+            showToast('🧪 辅助科技完成', `${cfg.name} — ${cfg.effect}`);
+            addLog(`🧪 辅助科技「${cfg.name}」研究完成（${cfg.effect}）`);
+          }
+          requestRender();
+        };
+      }
+
+      sideContainer.appendChild(div);
+    }
+  }
 }
 
 // ==================== 成就 ====================
@@ -149,9 +223,18 @@ export function renderAchievements(): void {
     const div = document.createElement('div');
     div.className = 'achieve-item';
     const progress = Math.floor(sys.getProgress(a.id) * 100);
+    const rewardText = [
+      a.reward.gold ? `${a.reward.gold.toLocaleString()}🪙` : '',
+      a.reward.parts ? `${a.reward.parts}⚙️` : '',
+      a.reward.title ? `称号「${a.reward.title}」` : '',
+      a.reward.skin ? `皮肤「${a.reward.skin}」` : '',
+    ].filter(Boolean).join(' ');
     div.innerHTML = `
-      <span>${a.isUnlocked ? '✅' : '⬜'} ${a.name}</span>
-      <span style="font-size:11px;color:var(--text-3);">${a.isUnlocked ? '✅ 已完成' : `${progress}%`}</span>
+      <div>
+        <div style="font-weight:800;">${a.isUnlocked ? '✅' : '⬜'} ${a.name}</div>
+        <div style="font-size:10px;color:var(--text-3);font-weight:600;margin-top:2px;">${a.description}${rewardText ? ` · 🎁 ${rewardText}` : ''}</div>
+      </div>
+      <span style="font-size:11px;color:var(--text-3);white-space:nowrap;margin-left:8px;">${a.isUnlocked ? '✅' : `${progress}%`}</span>
     `;
     container.appendChild(div);
   });

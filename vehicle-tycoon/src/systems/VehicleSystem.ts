@@ -14,6 +14,7 @@ import {
   GAME_CONSTANTS, expForLevel, cumulativeExpForLevel,
   statUpgradeCost
 } from '../config/GameConstants';
+import { hasSideTech, getEffectivePartsCost } from './TechSystem';
 
 export class VehicleSystem {
   private state: GameState;
@@ -45,10 +46,11 @@ export class VehicleSystem {
     }
 
     if (this.state.resources.gold < config.buildCost) return null;
-    if (this.state.resources.parts < config.partsCost) return null;
+    const partsCost = getEffectivePartsCost(this.state, config.partsCost);
+    if (this.state.resources.parts < partsCost) return null;
 
     this.state.resources.gold -= config.buildCost;
-    this.state.resources.parts -= config.partsCost;
+    this.state.resources.parts -= partsCost;
 
     const trait = rollTrait();
 
@@ -77,6 +79,23 @@ export class VehicleSystem {
     this.state.garage.vehicles.push(vehicle);
     this.state.stats.totalVehiclesProduced++;
     this.state.techTree.producedCount[tier - 1]++;
+
+    // 传承池：拆解旧车沉淀的经验，新车落地一次性继承（原始经验，不吃特质/品质加成）
+    const pool = this.state.garage.inheritanceExp;
+    if (pool > 0) {
+      this.state.garage.inheritanceExp = 0;
+      this.state.stats.totalVehiclesInherited++;
+      vehicle.exp += pool;
+      while (vehicle.level < this.getMaxLevel(vehicle.quality, vehicle.isEvolved)) {
+        const needed = expForLevel(vehicle.level);
+        if (vehicle.exp >= needed) {
+          vehicle.exp -= needed;
+          vehicle.level++;
+        } else {
+          break;
+        }
+      }
+    }
 
     EventBus.emit(GameEvent.VEHICLE_PRODUCED, vehicle, config);
     return vehicle;
@@ -224,14 +243,25 @@ export class VehicleSystem {
     return true;
   }
 
-  scrapVehicle(vehicleId: string): { parts: number; inheritedTrait: TraitType | null } {
+  scrapVehicle(vehicleId: string): { parts: number; inheritedTrait: TraitType | null; inheritedExp: number } {
     const vehicle = this.getVehicle(vehicleId);
-    if (!vehicle) return { parts: 0, inheritedTrait: null };
+    if (!vehicle) return { parts: 0, inheritedTrait: null, inheritedExp: 0 };
 
     const config = getVehicleConfig(vehicle.tier);
     const partsReturned = Math.floor((config?.partsCost ?? 0) * 0.6);
     this.state.resources.parts += partsReturned;
-    this.state.resources.gold += Math.floor((config?.buildCost ?? 0) * 0.3);
+    // 回收工艺：拆解金币返还 30% → 50%
+    const scrapGoldRatio = hasSideTech(this.state, 'recycling')
+      ? GAME_CONSTANTS.SIDE_RECYCLING_SCRAP_GOLD
+      : 0.3;
+    this.state.resources.gold += Math.floor((config?.buildCost ?? 0) * scrapGoldRatio);
+
+    // 传承：累计经验按比例沉淀进传承池，下一辆新车继承（技术档案 +15%）
+    const lifetimeExp = cumulativeExpForLevel(vehicle.level) + vehicle.exp;
+    const inheritRatio = GAME_CONSTANTS.INHERIT_EXP_RATIO
+      + (hasSideTech(this.state, 'archive') ? GAME_CONSTANTS.SIDE_ARCHIVE_INHERIT_BONUS : 0);
+    const inheritedExp = Math.floor(lifetimeExp * inheritRatio);
+    this.state.garage.inheritanceExp += inheritedExp;
 
     let inheritedTrait: TraitType | null = null;
     if (vehicle.trait && Math.random() < GAME_CONSTANTS.TRAIT_INHERIT_CHANCE) {
@@ -240,7 +270,7 @@ export class VehicleSystem {
     }
 
     this.removeFromGarage(vehicleId);
-    return { parts: partsReturned, inheritedTrait };
+    return { parts: partsReturned, inheritedTrait, inheritedExp };
   }
 
   // ==================== 状态管理 ====================

@@ -2,7 +2,7 @@
 // 科技树配置表
 // ============================================================
 
-import { TechConfigEntry } from '../core/types';
+import { TechConfigEntry, SideTechConfigEntry } from '../core/types';
 
 export const TECH_CONFIGS: TechConfigEntry[] = [
   {
@@ -54,4 +54,51 @@ export const TECH_CONFIGS: TechConfigEntry[] = [
 
 export function getTechConfig(level: number): TechConfigEntry | undefined {
   return TECH_CONFIGS.find(t => t.level === level);
+}
+
+// ============================================================
+// 辅助科技（支线）— 主线等级达标后可独立研究，永久被动加成
+// ============================================================
+
+export const SIDE_TECH_CONFIGS: SideTechConfigEntry[] = [
+  {
+    id: 'logistics',
+    name: '物流优化',
+    description: '订单生成间隔 -20%',
+    requiredLevel: 2,
+    goldCost: 3000,
+    partsCost: 50,
+    effect: '订单生成间隔 ×0.8',
+  },
+  {
+    id: 'lean_mfg',
+    name: '精益制造',
+    description: '造车零件消耗 -25%',
+    requiredLevel: 2,
+    goldCost: 4000,
+    partsCost: 80,
+    effect: '造车零件消耗 ×0.75',
+  },
+  {
+    id: 'archive',
+    name: '技术档案',
+    description: '拆解传承比例 +15%',
+    requiredLevel: 3,
+    goldCost: 12000,
+    partsCost: 200,
+    effect: '传承比例 50% → 65%',
+  },
+  {
+    id: 'recycling',
+    name: '回收工艺',
+    description: '拆解金币返还 30%→50%',
+    requiredLevel: 3,
+    goldCost: 15000,
+    partsCost: 250,
+    effect: '拆解金币返还 ×50%',
+  },
+];
+
+export function getSideTechConfig(id: string): SideTechConfigEntry | undefined {
+  return SIDE_TECH_CONFIGS.find(t => t.id === id);
 }

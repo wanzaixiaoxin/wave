@@ -214,6 +214,9 @@ function bindUI(): void {
     const result = getSystems().vehicleSys.createVehicle(tier);
     if (result) {
       addLog(`🔧 造了一辆 ${cfg.emoji}${cfg.name}，花费 ${cfg.buildCost}🪙`);
+      if (result.level > 1) {
+        addLog(`🧬 传承生效！${cfg.name} 起步就是 Lv.${result.level}`);
+      }
     }
     requestRender();
   };
@@ -229,6 +232,17 @@ function bindUI(): void {
       } else {
         addLog(`❌ 金币不足，扩建需要 ${ec.getNextExpandCost()}🪙`);
       }
+    }
+    requestRender();
+  };
+
+  document.getElementById('btn-overclock')!.onclick = () => {
+    const fs = getSystems().factorySys;
+    if (fs.activateOverclock()) {
+      addLog(`⚡ 工厂超负荷运转！${GAME_CONSTANTS.FACTORY_OVERCLOCK_DURATION} 秒内零件产出 ×${GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT}`);
+      showToast('⚡ 超负荷运转', `零件产出 ×${GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT}，持续 ${GAME_CONSTANTS.FACTORY_OVERCLOCK_DURATION} 秒`);
+    } else {
+      addLog('⏳ 超负荷还在冷却中');
     }
     requestRender();
   };

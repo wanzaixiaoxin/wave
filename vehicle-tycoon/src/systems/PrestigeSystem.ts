@@ -132,10 +132,13 @@ export class PrestigeSystem {
     this.state.resources = { gold: 500 + bonuses.startingGold, parts: 0 };
     this.state.garage.vehicles = [];
     this.state.garage.maxCapacity = 6 + (bonuses.garageBonus ?? 0);
+    this.state.garage.inheritanceExp = 0;
     this.state.factory.level = 1;
     this.state.factory.productionLines = [
       { index: 0, isActive: true },
     ];
+    this.state.factory.overclockUntil = 0;
+    this.state.factory.overclockCooldownUntil = 0;
     for (let i = 0; i < (bonuses.extraLines ?? 0); i++) {
       this.state.factory.productionLines.push({
         index: this.state.factory.productionLines.length,
@@ -147,6 +150,7 @@ export class PrestigeSystem {
       currentLevel: 1,
       isResearched: [false, false, false, false, false],
       producedCount: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      sideTechs: {},
     };
     this.state.activeEvents = [];
     this.state.stats = {
@@ -154,6 +158,7 @@ export class PrestigeSystem {
       totalVehiclesProduced: 0,
       totalOrdersCompleted: 0,
       totalEvolutions: 0,
+      totalVehiclesInherited: 0,
       totalPlayTime: 0,
       offlineTime: 0,
     };

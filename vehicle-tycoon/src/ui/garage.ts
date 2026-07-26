@@ -224,7 +224,7 @@ export function showVehicleDetail(v: Vehicle): void {
   // ---------- 拆解 ----------
   buttons.push('🔧 拆解', () => {
     const result = sys.vehicleSys.scrapVehicle(v.id);
-    addLog(`🔧 ${v.name} 已拆解，回收 ${result.parts}⚙️`);
+    addLog(`🔧 ${v.name} 已拆解，回收 ${result.parts}⚙️ · 🧬传承经验 +${result.inheritedExp}（下一辆新车继承）`);
     hideModal();
     requestRender();
   });

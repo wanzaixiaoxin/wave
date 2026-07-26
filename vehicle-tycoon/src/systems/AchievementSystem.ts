@@ -64,6 +64,69 @@ export class AchievementSystem {
       condition: { type: 'trait_collect', target: 6 },
       reward: { skin: '彩虹战队' },
     },
+    {
+      id: 'produce_10',
+      name: '十辆下线',
+      description: '累计造出 10 辆车',
+      condition: { type: 'produce_count', target: 10 },
+      reward: { gold: 300 },
+    },
+    {
+      id: 'produce_50',
+      name: '量产达人',
+      description: '累计造出 50 辆车',
+      condition: { type: 'produce_count', target: 50 },
+      reward: { gold: 3000, parts: 300 },
+    },
+    {
+      id: 'profit_10k',
+      name: '第一桶金',
+      description: '累计收入 10,000🪙',
+      condition: { type: 'profit_total', target: 10000 },
+      reward: { gold: 1000 },
+    },
+    {
+      id: 'profit_1m',
+      name: '百万富翁',
+      description: '累计收入 1,000,000🪙',
+      condition: { type: 'profit_total', target: 1000000 },
+      reward: { gold: 20000, parts: 1000 },
+    },
+    {
+      id: 'orders_50',
+      name: '使命必达',
+      description: '全车队累计完成 50 单',
+      condition: { type: 'total_orders', target: 50 },
+      reward: { gold: 1500, parts: 150 },
+    },
+    {
+      id: 'inherit_5',
+      name: '薪火相传',
+      description: '传承 5 次（新车继承拆解经验）',
+      condition: { type: 'inherit_count', target: 5 },
+      reward: { gold: 2000, parts: 200 },
+    },
+    {
+      id: 'tech_max',
+      name: '科技巅峰',
+      description: '主线科技研究到 Lv.5',
+      condition: { type: 'tech_level', target: 5 },
+      reward: { gold: 10000, parts: 1000 },
+    },
+    {
+      id: 'factory_max',
+      name: '工业巨擘',
+      description: '工厂升到 Lv.10',
+      condition: { type: 'factory_level', target: 10 },
+      reward: { gold: 20000, parts: 2000 },
+    },
+    {
+      id: 'side_tech_2',
+      name: '博采众长',
+      description: '研究 2 项辅助科技',
+      condition: { type: 'side_tech_count', target: 2 },
+      reward: { gold: 3000, parts: 300 },
+    },
   ];
 
   constructor(state: GameState) {
@@ -131,6 +194,21 @@ export class AchievementSystem {
       case 'prestige_count':
         return this.state.prestige.count >= condition.target;
 
+      case 'total_orders':
+        return this.state.stats.totalOrdersCompleted >= condition.target;
+
+      case 'tech_level':
+        return this.state.techTree.currentLevel >= condition.target;
+
+      case 'factory_level':
+        return this.state.factory.level >= condition.target;
+
+      case 'inherit_count':
+        return this.state.stats.totalVehiclesInherited >= condition.target;
+
+      case 'side_tech_count':
+        return Object.values(this.state.techTree.sideTechs).filter(n => n > 0).length >= condition.target;
+
       default:
         return false;
     }
@@ -193,6 +271,13 @@ export class AchievementSystem {
         current = Math.max(...this.state.garage.vehicles.map(v => v.ordersCompleted), 0);
         break;
       case 'prestige_count': current = this.state.prestige.count; break;
+      case 'total_orders': current = this.state.stats.totalOrdersCompleted; break;
+      case 'tech_level': current = this.state.techTree.currentLevel; break;
+      case 'factory_level': current = this.state.factory.level; break;
+      case 'inherit_count': current = this.state.stats.totalVehiclesInherited; break;
+      case 'side_tech_count':
+        current = Object.values(this.state.techTree.sideTechs).filter(n => n > 0).length;
+        break;
     }
 
     return Math.min(1, current / condition.target);

@@ -204,11 +204,14 @@ export interface ProductionLine {
 export interface Factory {
   level: number;
   productionLines: ProductionLine[];
+  overclockUntil: number;           // 超负荷运转截止时间戳（0=未激活）
+  overclockCooldownUntil: number;   // 超负荷冷却结束时间戳
 }
 
 export interface Garage {
   maxCapacity: number;
   vehicles: Vehicle[];
+  inheritanceExp: number;   // 传承池：拆解车辆沉淀的经验，下一辆新车落地继承
 }
 
 export interface TechTree {
@@ -216,6 +219,8 @@ export interface TechTree {
   isResearched: boolean[];
   // 解锁条件计数
   producedCount: number[];
+  // 辅助科技：id → 已研究级数（0/1）
+  sideTechs: Record<string, number>;
 }
 
 export interface Resources {
@@ -244,7 +249,9 @@ export interface Achievement {
 export interface AchievementCondition {
   type: 'produce_count' | 'evolve_count' | 'intimacy_max'
        | 'quality_count' | 'trait_collect' | 'profit_total'
-       | 'order_count' | 'prestige_count' | 'stats_max';
+       | 'order_count' | 'prestige_count' | 'stats_max'
+       | 'total_orders' | 'tech_level' | 'factory_level'
+       | 'inherit_count' | 'side_tech_count';
   target: number;
   params?: Record<string, unknown>;
 }
@@ -261,6 +268,7 @@ export interface GameStats {
   totalVehiclesProduced: number;
   totalOrdersCompleted: number;
   totalEvolutions: number;
+  totalVehiclesInherited: number;   // 触发传承（新车继承经验）的次数
   totalPlayTime: number;
   offlineTime: number;
 }
@@ -341,6 +349,17 @@ export interface TechConfigEntry {
   name: string;
   description: string;
   unlockCondition: string;
+  goldCost: number;
+  partsCost: number;
+  effect: string;
+}
+
+/** 辅助科技（支线）：主线等级达标后可独立研究，提供永久被动加成 */
+export interface SideTechConfigEntry {
+  id: string;
+  name: string;
+  description: string;
+  requiredLevel: number;   // 需要主线科技等级
   goldCost: number;
   partsCost: number;
   effect: string;

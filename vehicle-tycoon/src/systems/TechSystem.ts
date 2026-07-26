@@ -4,8 +4,20 @@
 
 import { EventBus } from '../core/EventBus';
 import { GameEvent, GameState, TechLevel } from '../core/types';
-import { getTechConfig, TECH_CONFIGS } from '../config/TechConfig';
+import { getTechConfig, getSideTechConfig, TECH_CONFIGS } from '../config/TechConfig';
 import { GAME_CONSTANTS } from '../config/GameConstants';
+
+/** 辅助科技是否已研究（纯函数，供各消费点读取） */
+export function hasSideTech(state: GameState, id: string): boolean {
+  return (state.techTree.sideTechs[id] ?? 0) > 0;
+}
+
+/** 造车零件实际消耗（精益制造 ×0.75，向下取整） */
+export function getEffectivePartsCost(state: GameState, base: number): number {
+  return hasSideTech(state, 'lean_mfg')
+    ? Math.floor(base * GAME_CONSTANTS.SIDE_LEAN_PARTS_MULT)
+    : base;
+}
 
 export class TechSystem {
   private state: GameState;
@@ -88,6 +100,38 @@ export class TechSystem {
         // 全厂收入 +50%（预留，由 OrderSystem 计算时实现）
         break;
     }
+  }
+
+  // ==================== 辅助科技（支线） ====================
+
+  /**
+   * 研究辅助科技。要求：主线等级达标 + 未研究过 + 资源足够
+   */
+  researchSideTech(id: string): boolean {
+    const config = getSideTechConfig(id);
+    if (!config) return false;
+    if (hasSideTech(this.state, id)) return false;
+    if (this.state.techTree.currentLevel < config.requiredLevel) return false;
+    if (this.state.resources.gold < config.goldCost) return false;
+    if (this.state.resources.parts < config.partsCost) return false;
+
+    this.state.resources.gold -= config.goldCost;
+    this.state.resources.parts -= config.partsCost;
+    this.state.techTree.sideTechs[id] = 1;
+    return true;
+  }
+
+  /** 辅助科技研究状态查询（UI 用） */
+  getSideTechState(id: string): { researched: boolean; levelMet: boolean; canAfford: boolean } {
+    const config = getSideTechConfig(id);
+    if (!config) return { researched: false, levelMet: false, canAfford: false };
+    return {
+      researched: hasSideTech(this.state, id),
+      levelMet: this.state.techTree.currentLevel >= config.requiredLevel,
+      canAfford:
+        this.state.resources.gold >= config.goldCost &&
+        this.state.resources.parts >= config.partsCost,
+    };
   }
 
   // ==================== 查询 ====================

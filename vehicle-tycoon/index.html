@@ -532,7 +532,7 @@
         <button class="btn btn-secondary" id="btn-expand">🏠 扩建</button>
       </div>
       <div style="font-size:10px;color:var(--text-3);font-weight:600;margin-top:6px;width:100%;">
-        🔧 造车消耗 🪙+⚙️（⚙️由🏭工厂产出）→ 🚗进车库接订单赚钱
+        🔧 造车消耗 🪙+⚙️（⚙️由🏭工厂产出）→ 🚗进车库接订单赚钱 · 🧬传承池 <span id="inherit-pool">0</span>（拆解旧车沉淀，新车继承）
       </div>
     </div>
 
@@ -573,9 +573,11 @@
           <span id="factory-lines-count" style="color:var(--text-1);font-weight:700;">1</span>
         </div>
       </div>
-      <div style="margin-top:8px;">
-        <button class="btn btn-gold" id="btn-upgrade-factory" style="font-size:12px;padding:6px 16px;width:100%;">⬆ 升级 (下一级: <span id="factory-upgrade-cost">500</span>🪙)</button>
+      <div style="margin-top:8px;display:flex;gap:8px;">
+        <button class="btn btn-gold" id="btn-upgrade-factory" style="flex:1;font-size:12px;padding:8px 12px;">⬆ 升级 (<span id="factory-upgrade-cost">500</span>🪙)</button>
+        <button class="btn btn-primary" id="btn-overclock" style="flex:1;font-size:12px;padding:8px 12px;">⚡ 超负荷运转</button>
       </div>
+      <div id="factory-next-info" style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px;"></div>
       <p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px;">
         💡 工厂持续产出零件 → 零件用于工作台造车 → 造的车跑订单赚钱 → 钱投入工厂升级（扩大产线 + 加速）
       </p>
@@ -584,7 +586,9 @@
     <div class="panel" id="panel-tech">
       <div class="section-title">🔬 科技树</div>
       <div class="tech-tree" id="tech-tree"></div>
-      <p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px;">💡 研究科技解锁新车型 · 科技 Lv.3 加速工厂产出 +25%</p>
+      <div class="section-title" style="margin-top:10px;">🧪 辅助科技</div>
+      <div class="tech-tree" id="side-tech-tree"></div>
+      <p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px;">💡 主线科技解锁新车型 · 辅助科技提供永久被动加成（互不冲突，可全研究）</p>
     </div>
 
     <div class="panel" id="panel-achievements">

@@ -12,6 +12,7 @@ import { getTraitConfig } from '../config/TraitConfig';
 import { GAME_CONSTANTS } from '../config/GameConstants';
 import { EconomySystem, getGlobalIncomeMult } from './EconomySystem';
 import { getEventMultiplier } from './EventSystem';
+import { hasSideTech } from './TechSystem';
 
 export class OrderSystem {
   private state: GameState;
@@ -42,6 +43,10 @@ export class OrderSystem {
     let genInterval = 3.5 + Math.random() * 2;
     if (this.hasEvolvedTalent(TalentType.Network)) {
       genInterval *= GAME_CONSTANTS.TALENT_NETWORK_REFRESH_MULT;
+    }
+    // 辅助科技「物流优化」：订单生成间隔 ×0.8
+    if (hasSideTech(this.state, 'logistics')) {
+      genInterval *= GAME_CONSTANTS.SIDE_LOGISTICS_INTERVAL_MULT;
     }
     const maxPending = 3 + this.state.techTree.currentLevel;
     if (this.orderGenTimer >= genInterval) {

@@ -196,18 +196,22 @@ export class SaveManager {
       garage: {
         maxCapacity: 6,
         vehicles: [],
+        inheritanceExp: 0,
       },
       factory: {
         level: 1,
         productionLines: [
           { index: 0, isActive: true },
         ],
+        overclockUntil: 0,
+        overclockCooldownUntil: 0,
       },
       orders: [],
       techTree: {
         currentLevel: 1,
         isResearched: [false, false, false, false, false],
         producedCount: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        sideTechs: {},
       },
       activeEvents: [],
       achievements: [],
@@ -216,6 +220,7 @@ export class SaveManager {
         totalVehiclesProduced: 0,
         totalOrdersCompleted: 0,
         totalEvolutions: 0,
+        totalVehiclesInherited: 0,
         totalPlayTime: 0,
         offlineTime: 0,
       },
