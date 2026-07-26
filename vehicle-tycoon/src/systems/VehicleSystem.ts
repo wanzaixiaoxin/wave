@@ -4,7 +4,7 @@
 
 import { EventBus } from '../core/EventBus';
 import {
-  GameEvent, GameState, Vehicle, VehicleStats,
+  GameEvent, GameState, Vehicle, VehicleStats, BuildJob,
   Quality, QUALITY_ORDER, qualityRank, VehicleStatus, TraitType, TalentType, Order,
   Specialization
 } from '../core/types';
@@ -20,6 +20,9 @@ export class VehicleSystem {
   private state: GameState;
   private vehicleIdCounter = 0;
 
+  /** 测试用：true 时造车/升品即时完成（smoke 等同步断言用），游戏内保持 false */
+  debugInstantBuild = false;
+
   constructor(state: GameState) {
     this.state = state;
     this.vehicleIdCounter = state.garage.vehicles.length;
@@ -34,16 +37,24 @@ export class VehicleSystem {
     });
   }
 
-  // ==================== 创建车辆 ====================
+  // ==================== 创建车辆（M7：建造队列） ====================
 
-  createVehicle(tier: number): Vehicle | null {
+  /**
+   * 造车 = 加入建造队列。建造槽 1 个 + 排队最多 BUILD_QUEUE_MAX 个；
+   * 资源在入队时扣除（防刷），车库按「现有 + 建造中 + 排队」预留未来车位。
+   * 返回：入队成功返回 BuildJob；debugInstantBuild 下即时落地返回 Vehicle；失败返回 null
+   */
+  createVehicle(tier: number): Vehicle | BuildJob | null {
     const config = getVehicleConfig(tier);
     if (!config) return null;
 
-    if (this.state.garage.vehicles.length >= this.state.garage.maxCapacity) {
+    // 预留未来车位：建造完成时车库必然有位置
+    if (this.state.garage.vehicles.length + this.state.garage.buildQueue.length >= this.state.garage.maxCapacity) {
       EventBus.emit(GameEvent.GARAGE_FULL, tier);
       return null;
     }
+
+    if (this.state.garage.buildQueue.length >= 1 + GAME_CONSTANTS.BUILD_QUEUE_MAX) return null;
 
     if (this.state.resources.gold < config.buildCost) return null;
     const partsCost = getEffectivePartsCost(this.state, config.partsCost);
@@ -52,6 +63,27 @@ export class VehicleSystem {
     this.state.resources.gold -= config.buildCost;
     this.state.resources.parts -= partsCost;
 
+    const job: BuildJob = { tier, totalTime: config.buildTime, finishAt: 0 };
+    this.state.garage.buildQueue.push(job);
+    // 空队列直接上建造槽，开始倒计时
+    if (this.state.garage.buildQueue.length === 1) {
+      job.finishAt = Date.now() + job.totalTime * 1000;
+    }
+
+    if (this.debugInstantBuild) {
+      // 测试模式：立即清空队列逐辆落地，行为等同原即时造车
+      while (this.state.garage.buildQueue.length > 0) {
+        const j = this.state.garage.buildQueue.shift()!;
+        this.produceVehicle(j.tier);
+      }
+      return this.state.garage.vehicles[this.state.garage.vehicles.length - 1] ?? null;
+    }
+    return job;
+  }
+
+  /** 建造落地：特质随机、传承池继承、产量计数，与原即时造车路径一致 */
+  private produceVehicle(tier: number): Vehicle {
+    const config = getVehicleConfig(tier)!;
     const trait = rollTrait();
 
     const vehicle: Vehicle = {
@@ -74,6 +106,7 @@ export class VehicleSystem {
       createdAt: Date.now(),
       status: VehicleStatus.Idle,
       statusEndAt: 0,
+      qualityUpgrade: null,
     };
 
     this.state.garage.vehicles.push(vehicle);
@@ -99,6 +132,18 @@ export class VehicleSystem {
 
     EventBus.emit(GameEvent.VEHICLE_PRODUCED, vehicle, config);
     return vehicle;
+  }
+
+  /** 结算建造队列：到点的建造槽车辆落地，下一辆上槽（可连续结算多辆，覆盖离线） */
+  private settleBuildQueue(): void {
+    const queue = this.state.garage.buildQueue;
+    while (queue.length > 0 && queue[0].finishAt > 0 && Date.now() >= queue[0].finishAt) {
+      const job = queue.shift()!;
+      this.produceVehicle(job.tier);
+      if (queue.length > 0) {
+        queue[0].finishAt = Date.now() + queue[0].totalTime * 1000;
+      }
+    }
   }
 
   nameVehicle(vehicleId: string, name: string): boolean {
@@ -148,11 +193,18 @@ export class VehicleSystem {
     return true;
   }
 
-  // ==================== 品质 ====================
+  // ==================== 品质（M7：耗时化 + 锁车） ====================
 
+  /**
+   * 开始品质升级：白→蓝 60s、蓝→金 180s。
+   * 资源在开始升级时扣除（防刷）；期间车辆 status = Maintenance（不可接单/指派），
+   * 到点后由 tick 应用品质并恢复 Idle。
+   */
   upgradeQuality(vehicleId: string): boolean {
     const vehicle = this.getVehicle(vehicleId);
     if (!vehicle) return false;
+    if (vehicle.qualityUpgrade) return false;                 // 已在升级中
+    if (vehicle.status !== VehicleStatus.Idle) return false;  // 锁车前提：空闲才能进场升级
 
     const currentIdx = QUALITY_ORDER.indexOf(vehicle.quality);
     if (currentIdx >= QUALITY_ORDER.length - 1) return false;
@@ -173,9 +225,28 @@ export class VehicleSystem {
       this.state.resources.parts -= GAME_CONSTANTS.QUALITY_GOLD_COST_PARTS;
     }
 
-    vehicle.quality = nextQuality;
-    EventBus.emit(GameEvent.QUALITY_UPGRADED, vehicle);
+    const totalTime = nextQuality === Quality.Blue
+      ? GAME_CONSTANTS.QUALITY_UPGRADE_TIME_BLUE
+      : GAME_CONSTANTS.QUALITY_UPGRADE_TIME_GOLD;
+    vehicle.qualityUpgrade = {
+      target: nextQuality,
+      totalTime,
+      finishAt: Date.now() + totalTime * 1000,
+    };
+    vehicle.status = VehicleStatus.Maintenance;
+
+    if (this.debugInstantBuild) this.settleQualityUpgrade(vehicle);
     return true;
+  }
+
+  /** 到点结算品质升级：应用目标品质、恢复空闲、发事件 */
+  private settleQualityUpgrade(vehicle: Vehicle): void {
+    const job = vehicle.qualityUpgrade;
+    if (!job) return;
+    vehicle.qualityUpgrade = null;
+    vehicle.quality = job.target;
+    vehicle.status = VehicleStatus.Idle;
+    EventBus.emit(GameEvent.QUALITY_UPGRADED, vehicle);
   }
 
   // ==================== 专精 ====================
@@ -276,10 +347,17 @@ export class VehicleSystem {
   // ==================== 状态管理 ====================
 
   tick(_deltaSeconds: number): void {
+    // 建造队列结算（时间戳制，离线期间到点的落地后下一辆自动上槽）
+    this.settleBuildQueue();
+
     for (const v of this.state.garage.vehicles) {
       if (v.status === VehicleStatus.OnOrder && v.statusEndAt > 0 && Date.now() >= v.statusEndAt) {
         v.status = VehicleStatus.Idle;
         v.statusEndAt = 0;
+      }
+      // 品质升级到点结算
+      if (v.qualityUpgrade && Date.now() >= v.qualityUpgrade.finishAt) {
+        this.settleQualityUpgrade(v);
       }
     }
   }

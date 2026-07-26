@@ -5,10 +5,12 @@
 import { EventBus } from '../core/EventBus';
 import {
   GameEvent, GameState, Order, OrderType, OrderStatus,
-  VehicleStatus, Quality, qualityRank, TalentType, Specialization
+  Vehicle, VehicleStatus, Quality, qualityRank, TalentType, Specialization,
+  EnRouteEventChoice
 } from '../core/types';
 import { getVehicleConfig } from '../config/VehicleConfig';
 import { getTraitConfig } from '../config/TraitConfig';
+import { getEnRouteEventConfig, rollEnRouteEvent } from '../config/EnRouteEventConfig';
 import { GAME_CONSTANTS } from '../config/GameConstants';
 import { EconomySystem, getGlobalIncomeMult } from './EconomySystem';
 import { getEventMultiplier } from './EventSystem';
@@ -56,8 +58,33 @@ export class OrderSystem {
       }
     }
 
-    // 自动结算到期订单（先收集，避免遍历中修改数组）
+    // 路上事件（M1）：到点未触发 → 发事件弹窗；已触发超决策窗口未决策 → 自动走默认项
+    // （车辆已不存在或订单结算时仍未触发的事件随订单静默丢弃）
     const now = Date.now();
+    for (const order of this.state.orders) {
+      const ee = order.enRouteEvent;
+      if (order.status !== OrderStatus.InProgress || !ee || ee.resolved) continue;
+      const vehicle = this.state.garage.vehicles.find(v => v.id === order.assignedVehicleId);
+      if (!vehicle) continue; // 车辆不存在，订单马上被结算，事件丢弃
+
+      if (ee.triggeredAt === undefined) {
+        if (now >= ee.triggerAt) {
+          // 同屏最多 1 个待决策事件：已有未决策的触发事件时，本事件顺延 3 秒
+          if (this.hasPendingEnRouteEvent()) {
+            ee.triggerAt = now + GAME_CONSTANTS.EN_ROUTE_POSTPONE_SECONDS * 1000;
+            continue;
+          }
+          ee.triggeredAt = now;
+          EventBus.emit(GameEvent.EN_ROUTE_EVENT_TRIGGERED, order, vehicle);
+        }
+      } else if (now >= ee.triggeredAt +
+        (GAME_CONSTANTS.EN_ROUTE_DECISION_WINDOW + GAME_CONSTANTS.EN_ROUTE_DECISION_TOLERANCE) * 1000) {
+        // 超时/挂机兜底：自动按默认项结算（默认项对玩家无害）
+        this.resolveEnRouteEventDefault(order.id);
+      }
+    }
+
+    // 自动结算到期订单（先收集，避免遍历中修改数组）
     const toComplete: string[] = [];
     const toExpire: string[] = [];
 
@@ -216,9 +243,133 @@ export class OrderSystem {
     if (vehicle.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD) {
       duration *= GAME_CONSTANTS.WEAR_DURATION_MULT;
     }
-    vehicle.statusEndAt = Date.now() + duration * 1000;
+    const departAt = Date.now();
+    vehicle.statusEndAt = departAt + duration * 1000;
+
+    // 路上事件（M1）：按概率排定一个途中事件（普通/贵重 40%、长途 70%），
+    // 触发点在行程 30%-70% 之间的随机时刻
+    const triggerChance = order.type === OrderType.LongDistance
+      ? GAME_CONSTANTS.EN_ROUTE_TRIGGER_CHANCE_LONG
+      : GAME_CONSTANTS.EN_ROUTE_TRIGGER_CHANCE_NORMAL;
+    if (Math.random() < triggerChance) {
+      const evt = rollEnRouteEvent();
+      order.enRouteEvent = {
+        eventId: evt.id,
+        triggerAt: departAt + duration * 1000 *
+          (GAME_CONSTANTS.EN_ROUTE_TRIGGER_POINT_MIN + Math.random() * GAME_CONSTANTS.EN_ROUTE_TRIGGER_POINT_RANGE),
+        resolved: false,
+      };
+    }
 
     EventBus.emit(GameEvent.ORDER_ASSIGNED, order, vehicle);
+    return true;
+  }
+
+  // ==================== 路上事件（M1） ====================
+
+  /**
+   * 是否存在已触发但未决策的路上事件（同屏最多 1 个）
+   */
+  private hasPendingEnRouteEvent(): boolean {
+    return this.state.orders.some(o =>
+      o.status === OrderStatus.InProgress &&
+      o.enRouteEvent && !o.enRouteEvent.resolved && o.enRouteEvent.triggeredAt !== undefined
+    );
+  }
+
+  /**
+   * 选项是否可选（耐久门槛 / 零件消耗校验，UI 层据此置灰）
+   */
+  isEnRouteChoiceAvailable(choice: EnRouteEventChoice, vehicle: Vehicle): boolean {
+    if (choice.requiredDurability && vehicle.stats.durability < choice.requiredDurability) return false;
+    if (choice.partsCost && this.state.resources.parts < choice.partsCost) return false;
+    return true;
+  }
+
+  /**
+   * 默认项下标：优先 isDefault 且可选的选项；默认项不可选（如耐久不足）时退到第一个可选项
+   */
+  private getDefaultChoiceIndex(eventId: string, vehicle: Vehicle): number {
+    const config = getEnRouteEventConfig(eventId);
+    if (!config) return 0;
+    const defaultIdx = config.choices.findIndex(c => c.isDefault);
+    if (defaultIdx >= 0 && this.isEnRouteChoiceAvailable(config.choices[defaultIdx], vehicle)) {
+      return defaultIdx;
+    }
+    const firstAvailable = config.choices.findIndex(c => this.isEnRouteChoiceAvailable(c, vehicle));
+    return firstAvailable >= 0 ? firstAvailable : 0;
+  }
+
+  /**
+   * 按默认项决策（超时/挂机兜底，UI 倒计时结束也走这里）
+   */
+  resolveEnRouteEventDefault(orderId: string): boolean {
+    const order = this.state.orders.find(o => o.id === orderId);
+    const ee = order?.enRouteEvent;
+    if (!order || !ee) return false;
+    const vehicle = this.state.garage.vehicles.find(v => v.id === order.assignedVehicleId);
+    if (!vehicle) return false;
+    return this.resolveEnRouteEvent(orderId, this.getDefaultChoiceIndex(ee.eventId, vehicle));
+  }
+
+  /**
+   * 决策路上事件：应用选项效果
+   * 耗时变化直接改 vehicle.statusEndAt；收入倍率累乘到 order.pendingRewardMult（结算时乘入）；
+   * 磨损/零件/金币/亲密度立即结算
+   */
+  resolveEnRouteEvent(orderId: string, choiceIndex: number): boolean {
+    const order = this.state.orders.find(o => o.id === orderId);
+    if (!order || order.status !== OrderStatus.InProgress) return false;
+    const ee = order.enRouteEvent;
+    if (!ee || ee.resolved || ee.triggeredAt === undefined) return false;
+    const config = getEnRouteEventConfig(ee.eventId);
+    const vehicle = this.state.garage.vehicles.find(v => v.id === order.assignedVehicleId);
+    if (!config || !vehicle) return false;
+    const choice = config.choices[choiceIndex];
+    if (!choice || !this.isEnRouteChoiceAvailable(choice, vehicle)) return false;
+
+    const now = Date.now();
+
+    // 耗时变化：倍率作用于剩余时间，秒数直接加到截止时刻
+    if (choice.durationMult) {
+      vehicle.statusEndAt = now + Math.round((vehicle.statusEndAt - now) * choice.durationMult);
+    }
+    if (choice.durationDeltaSec) {
+      vehicle.statusEndAt += choice.durationDeltaSec * 1000;
+    }
+
+    // 本单收入倍率（累乘，completeOrder 结算时走 EconomySystem 统一乘区）
+    if (choice.rewardMult) {
+      order.pendingRewardMult = (order.pendingRewardMult ?? 1) * choice.rewardMult;
+    }
+
+    // 磨损增减
+    if (choice.wearDelta) {
+      vehicle.wear = Math.min(GAME_CONSTANTS.WEAR_MAX, Math.max(0, vehicle.wear + choice.wearDelta));
+    }
+
+    // 零件消耗（可选性已校验，此处双保险不为负）
+    if (choice.partsCost) {
+      this.state.resources.parts = Math.max(0, this.state.resources.parts - choice.partsCost);
+    }
+
+    // 金币消耗：按本单期望收入百分比（期望模式计算，结果确定）
+    if (choice.goldCostPct) {
+      const estIncome = EconomySystem.calculateOrderIncome(
+        vehicle, order.baseReward, order.pendingRewardMult ?? 1,
+        getGlobalIncomeMult(this.state), false, this.state, order.type
+      ).income;
+      this.state.resources.gold = Math.max(0, this.state.resources.gold - Math.floor(estIncome * choice.goldCostPct));
+    }
+
+    // 亲密度增加
+    if (choice.intimacyGain) {
+      vehicle.intimacy = Math.min(GAME_CONSTANTS.MAX_INTIMACY, vehicle.intimacy + choice.intimacyGain);
+    }
+
+    ee.resolved = true;
+    ee.choiceIndex = choiceIndex;
+    EventBus.emit(GameEvent.EN_ROUTE_EVENT_RESOLVED, order, vehicle, choiceIndex);
     return true;
   }
 
@@ -246,8 +397,9 @@ export class OrderSystem {
       }
 
       // 收入统一走 EconomySystem（等级/品质/特质/载货/专精/进化/天赋/事件/磨损/疲劳 + 暴击 + 科技L5全局加成）
+      // 路上事件的收入倍率（pendingRewardMult）落在 orderTypeMult 乘区，保持乘区统一
       const result = EconomySystem.calculateOrderIncome(
-        vehicle, order.baseReward, 1.0, getGlobalIncomeMult(this.state),
+        vehicle, order.baseReward, order.pendingRewardMult ?? 1, getGlobalIncomeMult(this.state),
         true, this.state, order.type
       );
       totalReward = result.income;

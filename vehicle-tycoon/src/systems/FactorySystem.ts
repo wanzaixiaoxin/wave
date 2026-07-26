@@ -44,6 +44,18 @@ export class FactorySystem {
     return true;
   }
 
+  /** 车库最高车型 tier（空车库按 1 计）— 工厂进度系数用（M7） */
+  getTopTier(): number {
+    const vehicles = this.state.garage.vehicles;
+    if (vehicles.length === 0) return 1;
+    return Math.max(...vehicles.map(v => v.tier));
+  }
+
+  /** 进度系数：1 + 最高车型 tier × FACTORY_TIER_SCALING（工厂随进程变强） */
+  getTierScaling(): number {
+    return 1 + this.getTopTier() * GAME_CONSTANTS.FACTORY_TIER_SCALING;
+  }
+
   getPartsPerSecond(): number {
     const level = this.state.factory.level;
     const lineCount = this.getLineCount();
@@ -52,13 +64,15 @@ export class FactorySystem {
     const techBoost = this.state.techTree.currentLevel >= 3
       ? 1 + GAME_CONSTANTS.TECH_SPEED_BOOST
       : 1.0;
+    // 进度系数（M7）：车库最高车型 tier 越高，工厂产出越强
+    const tierScaling = this.getTierScaling();
     // 「加速光环」事件：产线速度倍率
     const eventBoost = getEventMultiplier(this.state, 'speed_mult');
     // 超负荷运转：限时产出倍率
     const overclockBoost = Date.now() < this.state.factory.overclockUntil
       ? GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT
       : 1.0;
-    return lineCount * baseRate * levelMult * techBoost * eventBoost * overclockBoost;
+    return lineCount * baseRate * levelMult * techBoost * tierScaling * eventBoost * overclockBoost;
   }
 
   // ==================== 超负荷运转 ====================

@@ -9,7 +9,7 @@ import { getVehicleConfig } from '../config/VehicleConfig';
 import { EconomySystem, getGlobalIncomeMult } from '../systems/EconomySystem';
 
 const SAVE_KEY = 'tycoon_save_v1';
-const SAVE_VERSION = '1.0';
+const SAVE_VERSION = '1.1'; // 1.1：M7 时间化（建造队列 / 研究计时 / 升品计时）
 const MAX_OFFLINE_SECONDS = 2 * 3600; // 2 hours
 const OFFLINE_EFFICIENCY = 0.4;
 
@@ -88,13 +88,14 @@ export class SaveManager {
         (merged as Record<string, unknown>)[key] = { ...defaults[key], ...data[key] };
       }
     }
-    // 老档车辆补齐新增字段（磨损/疲劳/专精）
+    // 老档车辆补齐新增字段（磨损/疲劳/专精/升品计时）
     if (merged.garage?.vehicles) {
       merged.garage.vehicles = merged.garage.vehicles.map(v => ({
         specialization: null,
         wear: 0,
         consecutiveOrders: 0,
         lastOrderCompletedAt: 0,
+        qualityUpgrade: null,
         ...(v as Partial<Vehicle>),
       } as Vehicle));
     }
@@ -197,6 +198,7 @@ export class SaveManager {
         maxCapacity: 6,
         vehicles: [],
         inheritanceExp: 0,
+        buildQueue: [],
       },
       factory: {
         level: 1,
@@ -212,6 +214,7 @@ export class SaveManager {
         isResearched: [false, false, false, false, false],
         producedCount: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         sideTechs: {},
+        researching: null,
       },
       activeEvents: [],
       achievements: [],

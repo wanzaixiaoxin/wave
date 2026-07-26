@@ -9,18 +9,21 @@ import { SaveManager } from './core/SaveManager';
 import { GameEvent, GameState, Vehicle, Order, OfflineResult } from './core/types';
 import { getVehicleConfig, getUnlockedConfigs } from './config/VehicleConfig';
 import { GAME_CONSTANTS } from './config/GameConstants';
+import { getEnRouteEventConfig } from './config/EnRouteEventConfig';
 
 import { setGameLoop, setRenderFn, requestRender, getState, getSystems } from './ui/context';
 import { getTraitName, pickRandomNames } from './ui/format';
 import { showToast } from './ui/toast';
 import { showFloatingGold, showCritEffect, goldBounce } from './ui/effects';
 import { showModal, hideModal } from './ui/modal';
+import { showEnRouteEventCard, dismissEnRouteCard } from './ui/enroute';
 import { addLog } from './ui/log';
 import { startTutorial, bindTutorial, resetTutorial } from './ui/tutorial';
 import { renderGarage } from './ui/garage';
 import { renderOrders } from './ui/orders';
+import { renderHint } from './ui/hint';
 import {
-  renderTopBar, updateStatusIcons, buildTierOptions,
+  renderTopBar, updateStatusIcons, buildTierOptions, renderWorkbench,
   renderFactory, renderTech, renderAchievements,
 } from './ui/panels';
 
@@ -81,6 +84,7 @@ function init(): void {
 
 function renderAll(): void {
   renderTopBar();
+  renderHint();
   renderGarage();
   renderOrders();
   renderFactory();
@@ -88,6 +92,7 @@ function renderAll(): void {
   renderAchievements();
   updateStatusIcons();
   buildTierOptions();
+  renderWorkbench();
 }
 
 // ==================== 事件监听 ====================
@@ -99,7 +104,8 @@ function bindEvents(): void {
     GameEvent.ORDER_COMPLETED, GameEvent.ACHIEVEMENT_UNLOCKED,
     GameEvent.GARAGE_EXPANDED, GameEvent.FACTORY_UPGRADED,
     GameEvent.TECH_RESEARCHED, GameEvent.RANDOM_EVENT_TRIGGERED,
-    GameEvent.OFFLINE_EARNINGS,
+    GameEvent.OFFLINE_EARNINGS, GameEvent.QUALITY_UPGRADED,
+    GameEvent.EN_ROUTE_EVENT_TRIGGERED, GameEvent.EN_ROUTE_EVENT_RESOLVED,
   ];
 
   events.forEach(e => EventBus.on(e, (...args: unknown[]) => {
@@ -126,6 +132,9 @@ function bindEvents(): void {
         const autoName = pickRandomNames(1, taken)[0];
         if (autoName) getSystems().vehicleSys.nameVehicle(v.id, autoName);
         addLog(`🚗 新车出厂！${cfg?.emoji} ${v.name} [${getTraitName(v.trait)}]`);
+        if (v.level > 1) {
+          addLog(`🧬 传承生效！${cfg?.name} 起步就是 Lv.${v.level}`);
+        }
         showToast(`🚗 新车出厂！`, `${cfg?.emoji} ${v.name} · ${getTraitName(v.trait)}`);
         setTimeout(() => addLog('💡 等几秒订单刷新后，点击「派车」让它去赚钱'), 2000);
         break;
@@ -149,6 +158,28 @@ function bindEvents(): void {
         addLog(`🎲 ${evt.name}: ${evt.description}`);
         break;
       }
+      case GameEvent.EN_ROUTE_EVENT_TRIGGERED: {
+        // 路上事件（M1）：非模态浮动卡片（不抢焦点，可无视；超时走默认项）
+        const o = args[0] as Order;
+        const v = args[1] as Vehicle;
+        const cfg = o.enRouteEvent ? getEnRouteEventConfig(o.enRouteEvent.eventId) : undefined;
+        if (cfg) showEnRouteEventCard(o, v, cfg);
+        break;
+      }
+      case GameEvent.EN_ROUTE_EVENT_RESOLVED: {
+        // 决策完成（玩家点击或超时默认项）：滑出卡片 + toast 提示结果
+        const o = args[0] as Order;
+        const v = args[1] as Vehicle | undefined;
+        const idx = args[2] as number;
+        const cfg = o.enRouteEvent ? getEnRouteEventConfig(o.enRouteEvent.eventId) : undefined;
+        const choice = cfg?.choices[idx];
+        if (cfg && choice) {
+          showToast(`${cfg.emoji} ${cfg.name}`, `${v?.name ?? '车辆'}「${choice.label}」${choice.summary}`);
+          addLog(`${cfg.emoji} ${v?.name ?? '车辆'} 路上事件「${cfg.name}」→ ${choice.label}（${choice.summary}）`);
+        }
+        dismissEnRouteCard();
+        break;
+      }
       case GameEvent.ACHIEVEMENT_UNLOCKED: {
         const a = args[0] as { name: string };
         showToast('🏆 成就解锁！', a.name);
@@ -167,6 +198,12 @@ function bindEvents(): void {
       case GameEvent.TECH_RESEARCHED: {
         addLog(`🔬 科技研究完成！新车型已解锁`);
         showToast('🔬 科技研究完成', '新车型已解锁，快去造车吧！');
+        break;
+      }
+      case GameEvent.QUALITY_UPGRADED: {
+        const v = args[0] as Vehicle;
+        addLog(`⬆ ${v.name} 品质升级完成：${v.quality === 'blue' ? '⚪→🔵 精良' : '🔵→🟡 传说'}`);
+        showToast('⬆ 品质提升！', `${v.name}: ${v.quality === 'blue' ? '⚪→🔵' : '🔵→🟡'}`);
         break;
       }
       case GameEvent.OFFLINE_EARNINGS: {
@@ -198,8 +235,13 @@ function bindUI(): void {
       addLog(`❌ T${tier} ${cfg.name} 还未解锁（需要先在🔬科技树中研究）`);
       return;
     }
-    if (s.garage.vehicles.length >= s.garage.maxCapacity) {
-      addLog(`❌ 车库已满（${s.garage.maxCapacity} 格），请先扩建或送走一辆车`);
+    // 预留未来车位：现有 + 建造中 + 排队 占满则禁止入队
+    if (s.garage.vehicles.length + s.garage.buildQueue.length >= s.garage.maxCapacity) {
+      addLog(`❌ 车库已满（${s.garage.maxCapacity} 格，含建造中的车），请先扩建或送走一辆车`);
+      return;
+    }
+    if (s.garage.buildQueue.length >= 1 + GAME_CONSTANTS.BUILD_QUEUE_MAX) {
+      addLog(`❌ 建造队列已满（建造槽 + ${GAME_CONSTANTS.BUILD_QUEUE_MAX} 个排队位），等造完再来`);
       return;
     }
     if (s.resources.gold < cfg.buildCost) {
@@ -213,10 +255,7 @@ function bindUI(): void {
 
     const result = getSystems().vehicleSys.createVehicle(tier);
     if (result) {
-      addLog(`🔧 造了一辆 ${cfg.emoji}${cfg.name}，花费 ${cfg.buildCost}🪙`);
-      if (result.level > 1) {
-        addLog(`🧬 传承生效！${cfg.name} 起步就是 Lv.${result.level}`);
-      }
+      addLog(`🔧 ${cfg.emoji}${cfg.name} 已开工，预计 ${cfg.buildTime} 秒后出厂（-${cfg.buildCost}🪙）`);
     }
     requestRender();
   };

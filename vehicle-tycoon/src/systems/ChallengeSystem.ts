@@ -193,6 +193,7 @@ export class ChallengeSystem {
         createdAt: Date.now(),
         status: VehicleStatus.Idle,
         statusEndAt: 0,
+        qualityUpgrade: null,
       };
       fleet.push(vehicle);
     }

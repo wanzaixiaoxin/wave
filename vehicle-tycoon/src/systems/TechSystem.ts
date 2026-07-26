@@ -22,16 +22,21 @@ export function getEffectivePartsCost(state: GameState, base: number): number {
 export class TechSystem {
   private state: GameState;
 
+  /** 测试用：true 时研究即时完成（smoke 等同步断言用），游戏内保持 false */
+  debugInstantResearch = false;
+
   constructor(state: GameState) {
     this.state = state;
   }
 
-  // ==================== 研究 ====================
+  // ==================== 研究（M7：耗时化，主线/支线共享一个研究槽） ====================
 
   /**
-   * 研究下一级科技
+   * 开始研究下一级主线科技：资源在开始时扣除（防刷），到点后由 tick 解锁
    */
   researchNext(): boolean {
+    if (this.state.techTree.researching) return false; // 研究槽被占用
+
     const nextLevel = this.state.techTree.currentLevel + 1;
     if (nextLevel > 5) return false; // 已满级
     if (this.state.techTree.isResearched[nextLevel - 1]) return false; // 已研究
@@ -50,15 +55,40 @@ export class TechSystem {
     this.state.resources.gold -= config.goldCost;
     this.state.resources.parts -= config.partsCost;
 
-    // 解锁
-    this.state.techTree.isResearched[nextLevel - 1] = true;
-    this.state.techTree.currentLevel = nextLevel;
+    const totalTime = GAME_CONSTANTS.RESEARCH_TIME_MAIN[nextLevel] ?? 60;
+    this.state.techTree.researching = {
+      kind: 'main',
+      level: nextLevel,
+      totalTime,
+      finishAt: Date.now() + totalTime * 1000,
+    };
 
-    // 科技专属效果
-    this.applyTechEffect(nextLevel);
-
-    EventBus.emit(GameEvent.TECH_RESEARCHED, nextLevel, config);
+    if (this.debugInstantResearch) this.settleResearch();
     return true;
+  }
+
+  /** 到点结算研究：应用解锁/效果并发事件 */
+  private settleResearch(): void {
+    const job = this.state.techTree.researching;
+    if (!job) return;
+    this.state.techTree.researching = null;
+
+    if (job.kind === 'main' && job.level !== undefined) {
+      const config = getTechConfig(job.level);
+      this.state.techTree.isResearched[job.level - 1] = true;
+      this.state.techTree.currentLevel = job.level;
+      this.applyTechEffect(job.level);
+      EventBus.emit(GameEvent.TECH_RESEARCHED, job.level, config);
+    } else if (job.kind === 'side' && job.sideId) {
+      this.state.techTree.sideTechs[job.sideId] = 1;
+    }
+  }
+
+  /** 研究计时（1Hz，由 GameLoop 驱动；时间戳制，离线到点自动完成） */
+  tick(_deltaSeconds: number): void {
+    if (this.state.techTree.researching && Date.now() >= this.state.techTree.researching.finishAt) {
+      this.settleResearch();
+    }
   }
 
   // ==================== 解锁条件检查 ====================
@@ -105,9 +135,12 @@ export class TechSystem {
   // ==================== 辅助科技（支线） ====================
 
   /**
-   * 研究辅助科技。要求：主线等级达标 + 未研究过 + 资源足够
+   * 开始研究辅助科技。要求：研究槽空闲 + 主线等级达标 + 未研究过 + 资源足够。
+   * 资源在开始时扣除（防刷），到点后由 tick 生效
    */
   researchSideTech(id: string): boolean {
+    if (this.state.techTree.researching) return false; // 研究槽被占用
+
     const config = getSideTechConfig(id);
     if (!config) return false;
     if (hasSideTech(this.state, id)) return false;
@@ -117,7 +150,16 @@ export class TechSystem {
 
     this.state.resources.gold -= config.goldCost;
     this.state.resources.parts -= config.partsCost;
-    this.state.techTree.sideTechs[id] = 1;
+
+    const totalTime = GAME_CONSTANTS.RESEARCH_TIME_SIDE;
+    this.state.techTree.researching = {
+      kind: 'side',
+      sideId: id,
+      totalTime,
+      finishAt: Date.now() + totalTime * 1000,
+    };
+
+    if (this.debugInstantResearch) this.settleResearch();
     return true;
   }
 
@@ -130,7 +172,8 @@ export class TechSystem {
       levelMet: this.state.techTree.currentLevel >= config.requiredLevel,
       canAfford:
         this.state.resources.gold >= config.goldCost &&
-        this.state.resources.parts >= config.partsCost,
+        this.state.resources.parts >= config.partsCost &&
+        !this.state.techTree.researching,
     };
   }
 
@@ -150,7 +193,8 @@ export class TechSystem {
     const conditionMet = this.checkUnlockCondition(nextLevel);
     const canAfford =
       this.state.resources.gold >= config.goldCost &&
-      this.state.resources.parts >= config.partsCost;
+      this.state.resources.parts >= config.partsCost &&
+      !this.state.techTree.researching; // 研究槽占用时不可开始（M7）
 
     return { level: nextLevel, canAfford, conditionMet };
   }

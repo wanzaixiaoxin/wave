@@ -103,6 +103,9 @@ export enum GameEvent {
   ORDER_GENERATED = 'order:generated',
   ORDER_ASSIGNED = 'order:assigned',
   ORDER_COMPLETED = 'order:completed',
+  // 路上事件（M1）：在途订单触发 2-3 选 1 微决策
+  EN_ROUTE_EVENT_TRIGGERED = 'order:en_route_triggered',
+  EN_ROUTE_EVENT_RESOLVED = 'order:en_route_resolved',
 
   // 资源事件
   RESOURCE_CHANGED = 'resource:changed',
@@ -179,6 +182,7 @@ export interface Vehicle {
   createdAt: number;
   status: VehicleStatus;
   statusEndAt: number;             // 0 = no limit
+  qualityUpgrade: QualityUpgradeJob | null;  // 进行中的品质升级（M7），null = 无
 }
 
 export interface Order {
@@ -194,11 +198,43 @@ export interface Order {
   status: OrderStatus;
   createdAt: number;
   expiresAt: number;
+  // 路上事件（M1）：派单时按概率排定，到点弹出 2-3 选 1 决策
+  enRouteEvent?: {
+    eventId: string;
+    triggerAt: number;             // 触发时间戳（毫秒）
+    resolved: boolean;             // 是否已决策（含超时走默认项）
+    triggeredAt?: number;          // 实际触发（弹窗）时间戳，用于 UI 倒计时与超时兜底
+    choiceIndex?: number;          // 玩家所选选项下标
+  };
+  pendingRewardMult?: number;      // 路上事件累积的本单收入倍率（默认 1，结算时乘入）
 }
 
 export interface ProductionLine {
   index: number;
   isActive: boolean;
+}
+
+/** 建造任务（M7）：下标 0 在建造槽上（finishAt 为完成时间戳），其余排队中（finishAt = 0） */
+export interface BuildJob {
+  tier: number;
+  totalTime: number;   // 总耗时（秒，取自车型 buildTime）
+  finishAt: number;    // 完成时间戳（毫秒）；0 = 排队中未上槽
+}
+
+/** 进行中的研究（M7）：主线/支线共享一个研究槽 */
+export interface ActiveResearch {
+  kind: 'main' | 'side';
+  level?: number;      // kind = 'main' 时的目标等级
+  sideId?: string;     // kind = 'side' 时的支线 id
+  totalTime: number;   // 总耗时（秒）
+  finishAt: number;    // 完成时间戳（毫秒）
+}
+
+/** 进行中的品质升级（M7）：期间车辆 status = Maintenance */
+export interface QualityUpgradeJob {
+  target: Quality;
+  totalTime: number;   // 总耗时（秒）
+  finishAt: number;    // 完成时间戳（毫秒）
 }
 
 export interface Factory {
@@ -212,6 +248,7 @@ export interface Garage {
   maxCapacity: number;
   vehicles: Vehicle[];
   inheritanceExp: number;   // 传承池：拆解车辆沉淀的经验，下一辆新车落地继承
+  buildQueue: BuildJob[];   // 建造队列（M7）：下标 0 为建造槽，最多 1 + BUILD_QUEUE_MAX 个
 }
 
 export interface TechTree {
@@ -221,6 +258,8 @@ export interface TechTree {
   producedCount: number[];
   // 辅助科技：id → 已研究级数（0/1）
   sideTechs: Record<string, number>;
+  // 进行中的研究（M7）：主线/支线共享一个研究槽，null = 空闲
+  researching: ActiveResearch | null;
 }
 
 export interface Resources {
@@ -372,6 +411,30 @@ export interface TraitConfigEntry {
   effectType: string;
   effectValue: number;
   probability: number;
+}
+
+/** 路上事件选项（M1）：每个事件 2-3 选 1，效果可叠加多种类型 */
+export interface EnRouteEventChoice {
+  label: string;                // 选项名，如「绕行」
+  summary: string;              // 效果摘要，如「+15s」（弹窗按钮与结果 toast 共用）
+  isDefault?: boolean;          // 是否为超时默认项（挂机兜底，对玩家无害）
+  requiredDurability?: number;  // 车辆耐久门槛（如交警「出示年检」需耐久≥4）
+  durationDeltaSec?: number;    // 耗时增减（秒，直接加到 statusEndAt）
+  durationMult?: number;        // 剩余耗时倍率（如好天气「赶路」×0.85）
+  wearDelta?: number;           // 磨损增减
+  rewardMult?: number;          // 本单收入倍率（累乘到 order.pendingRewardMult）
+  partsCost?: number;           // 零件消耗（零件不足时该选项不可选）
+  goldCostPct?: number;         // 金币消耗（按本单期望收入百分比）
+  intimacyGain?: number;        // 亲密度增加
+}
+
+export interface EnRouteEventConfigEntry {
+  id: string;
+  name: string;
+  emoji: string;
+  description: string;
+  weight: number;               // 基础触发权重（事件池内按权重抽取）
+  choices: EnRouteEventChoice[];
 }
 
 // ==================== 运行时状态 ====================

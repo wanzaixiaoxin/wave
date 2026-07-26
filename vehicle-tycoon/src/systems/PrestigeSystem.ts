@@ -133,6 +133,7 @@ export class PrestigeSystem {
     this.state.garage.vehicles = [];
     this.state.garage.maxCapacity = 6 + (bonuses.garageBonus ?? 0);
     this.state.garage.inheritanceExp = 0;
+    this.state.garage.buildQueue = [];
     this.state.factory.level = 1;
     this.state.factory.productionLines = [
       { index: 0, isActive: true },
@@ -151,6 +152,7 @@ export class PrestigeSystem {
       isResearched: [false, false, false, false, false],
       producedCount: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       sideTechs: {},
+      researching: null,
     };
     this.state.activeEvents = [];
     this.state.stats = {

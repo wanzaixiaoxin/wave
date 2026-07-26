@@ -38,7 +38,14 @@ export function renderGarage(): void {
       : v.quality === 'blue' ? '<span class="quality-badge blue-badge">精良</span>' : '';
 
     const statusClass = v.status === 'idle' ? 'idle' : 'busy';
-    const statusText = v.status === 'idle' ? '✅ 空闲' : '🚚 派单中';
+    const upgradeRemain = v.qualityUpgrade
+      ? Math.max(0, Math.ceil((v.qualityUpgrade.finishAt - Date.now()) / 1000))
+      : 0;
+    const statusText = v.status === 'idle'
+      ? '✅ 空闲'
+      : v.status === 'maintenance'
+        ? `⬆ 升级中 ${upgradeRemain}s`
+        : '🚚 派单中';
     const traitName = getTraitName(v.trait);
     const maxLv = vehicleSys.getMaxLevel(v.quality, v.isEvolved);
     const SPEC_ICONS: Record<string, string> = { express: '⚡快车', heavy: '💪重载', steady: '🛡️稳健' };
@@ -91,7 +98,7 @@ export function showVehicleDetail(v: Vehicle): void {
     ${wearLine}
     <p>🏎️速度 ${v.stats.speed}/5（耗时-4%/级）· 📦载货 ${v.stats.cargo}/5（收入+4%/级）· 🔩耐久 ${v.stats.durability}/5（≥3 可接🏔️长途单）</p>
     <p>📦 ${v.ordersCompleted}单 · 🪙 ${v.totalEarnings.toLocaleString()}</p>
-    <p>${v.status === 'idle' ? '✅ 空闲' : '🚚 执行订单中'}</p>
+    <p>${v.status === 'idle' ? '✅ 空闲' : v.status === 'maintenance' ? `⬆ 品质升级中，剩余 ${Math.max(0, Math.ceil(((v.qualityUpgrade?.finishAt ?? 0) - Date.now()) / 1000))}s` : '🚚 执行订单中'}</p>
     ${v.isEvolved ? '<p style="color:var(--gold-strong);">🌟 已进化 — 获得专属天赋：' + (config?.talentDesc || '') + '</p>' : v.quality === Quality.Gold && v.level >= GAME_CONSTANTS.MAX_VEHICLE_LEVEL && v.intimacy >= GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT ? '<p style="color:var(--gold-strong);font-weight:600;">✨ 可以进化！</p>' : ''}
   `;
 
@@ -199,14 +206,18 @@ export function showVehicleDetail(v: Vehicle): void {
     }
   }
 
-  // ---------- 提升品质 ----------
-  if (v.quality !== Quality.Gold) {
-    buttons.push('⬆ 提升品质', () => {
+  // ---------- 提升品质（M7：耗时化，升级中锁车不显示按钮） ----------
+  if (v.quality !== Quality.Gold && !v.qualityUpgrade) {
+    const upgradeTime = v.quality === Quality.White
+      ? GAME_CONSTANTS.QUALITY_UPGRADE_TIME_BLUE
+      : GAME_CONSTANTS.QUALITY_UPGRADE_TIME_GOLD;
+    buttons.push(`⬆ 提升品质 (${upgradeTime}s)`, () => {
       if (sys.vehicleSys.upgradeQuality(v.id)) {
-        showToast('⬆ 品质提升！', `${v.name}: ${v.quality === 'blue' ? '⚪→🔵' : '🔵→🟡'}`);
+        showToast('⬆ 开始升级', `${v.name} 进场升级品质，${upgradeTime} 秒后完成（期间不可派单）`);
+        addLog(`⬆ ${v.name} 开始升级品质（${upgradeTime}s），期间锁定不可派单`);
         hideModal();
       } else {
-        addLog('❌ 品质升级条件不足（需要完成订单数/金币/零件）');
+        addLog('❌ 品质升级条件不足（需要空闲 + 完成订单数/金币/零件）');
       }
       requestRender();
     });

@@ -109,7 +109,8 @@ export class GameLoop {
     // 按顺序执行各系统 tick
     this.factorySys.tick(1);           // 产线生产
     this.orderSys.tick(1);             // 订单倒计时
-    this.vehicleSys.tick(1);           // 车辆状态更新
+    this.vehicleSys.tick(1);           // 车辆状态更新（含建造队列/升品结算）
+    this.techSys.tick(1);              // 研究计时结算（M7）
     this.eventSys.tick(1);             // 随机事件判定
     this.achievementSys.tick();        // 成就判定
 

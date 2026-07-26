@@ -115,14 +115,31 @@ export const GAME_CONSTANTS = {
   FACTORY_OVERCLOCK_MULT: 2.0,      // 超负荷运转：产出 ×2
   FACTORY_OVERCLOCK_DURATION: 60,   // 持续 60 秒
   FACTORY_OVERCLOCK_COOLDOWN: 300,  // 冷却 5 分钟
+  FACTORY_TIER_SCALING: 0.3,       // 进度系数（M7）：产出 ×(1 + 车库最高车型 tier × 0.3)，空车库按 T1 计
   TECH_SPEED_BOOST: 0.25,           // 科技 L3+ 加速 +25%
   TECH_GLOBAL_INCOME_MULT: 1.5,     // 科技 L5 全厂收入 ×1.5
+
+  // ===== 时间化（M7） =====
+  BUILD_QUEUE_MAX: 3,                       // 建造排队位（另有 1 个建造槽）
+  RESEARCH_TIME_MAIN: [0, 30, 60, 120, 240, 480], // 主线 L1-L5 研究耗时（秒）
+  RESEARCH_TIME_SIDE: 60,                   // 支线研究统一耗时（秒）
+  QUALITY_UPGRADE_TIME_BLUE: 60,            // 品质升级耗时：白→蓝（秒）
+  QUALITY_UPGRADE_TIME_GOLD: 180,           // 品质升级耗时：蓝→金（秒）
 
   // ===== 辅助科技（支线）效果 =====
   SIDE_LOGISTICS_INTERVAL_MULT: 0.8,  // 物流优化：订单生成间隔 ×0.8
   SIDE_LEAN_PARTS_MULT: 0.75,         // 精益制造：造车零件消耗 ×0.75
   SIDE_ARCHIVE_INHERIT_BONUS: 0.15,   // 技术档案：传承比例 +15 个百分点
   SIDE_RECYCLING_SCRAP_GOLD: 0.5,     // 回收工艺：拆解金币返还 30%→50%
+
+  // ===== 路上事件（M1） =====
+  EN_ROUTE_TRIGGER_CHANCE_NORMAL: 0.4,  // 普通/贵重单触发概率
+  EN_ROUTE_TRIGGER_CHANCE_LONG: 0.7,    // 长途单触发概率（耗时长、窗口大）
+  EN_ROUTE_TRIGGER_POINT_MIN: 0.3,      // 触发点：行程 30% 起
+  EN_ROUTE_TRIGGER_POINT_RANGE: 0.4,    // 触发点区间宽度（行程 30%-70%）
+  EN_ROUTE_DECISION_WINDOW: 10,         // 决策窗口（秒），超时走默认项
+  EN_ROUTE_DECISION_TOLERANCE: 1,       // 超时判定容差（秒）
+  EN_ROUTE_POSTPONE_SECONDS: 3,         // 同屏已有待决策事件时，新到点事件顺延秒数
 
   // ===== 轮回 =====
   PRESTIGE_GOLD_THRESHOLD: 10000000,

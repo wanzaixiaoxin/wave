@@ -11,6 +11,8 @@ import { getVehicleConfig } from '../src/config/VehicleConfig';
 import { FactorySystem } from '../src/systems/FactorySystem';
 import { TechSystem, getEffectivePartsCost } from '../src/systems/TechSystem';
 import { IntimacySystem } from '../src/systems/IntimacySystem';
+import { getEnRouteEventConfig } from '../src/config/EnRouteEventConfig';
+import { computeHint } from '../src/ui/hint';
 
 let failures = 0;
 function check(name: string, cond: boolean, extra = '') {
@@ -20,6 +22,7 @@ function check(name: string, cond: boolean, extra = '') {
 
 const state = SaveManager.createInitialState();
 const vehicleSys = new VehicleSystem(state);
+vehicleSys.debugInstantBuild = true; // M7：测试用即时完成，保持同步断言
 const orderSys = new OrderSystem(state);
 new EventSystem(state);
 new AchievementSystem(state);
@@ -215,6 +218,7 @@ check('冷却中不可重复激活', !factorySys.activateOverclock());
 
 // 23. 辅助科技：等级门槛、研究、折扣、传承加成、回收加成
 const techSys = new TechSystem(state);
+techSys.debugInstantResearch = true; // M7：测试用即时完成
 state.resources.gold = 10_000_000;
 state.resources.parts = 1_000_000;
 check('主线不足不能研究支线', !techSys.researchSideTech('archive')); // 需要 L3，当前 L1
@@ -250,6 +254,251 @@ achieveSys.tick();
 check('科技巅峰成就解锁', !!state.achievements.find(a => a.id === 'tech_max')?.isUnlocked);
 check('工业巨擘成就解锁', !!state.achievements.find(a => a.id === 'factory_max')?.isUnlocked);
 check('博采众长成就解锁', !!state.achievements.find(a => a.id === 'side_tech_2')?.isUnlocked);
+
+// 25. 路上事件（M1）：选项效果比值、超时默认项、pendingRewardMult 乘区、可选性门槛
+
+// 派一单并注入指定路上事件（triggerAt 已到点），返回订单
+const assignWithEvent = (id: string, eventId: string): import('../src/core/types').Order => {
+  state.orders.push({
+    id, type: OrderType.Normal, tier: 1, baseReward: 100, expReward: 20, duration: 30,
+    assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
+  });
+  orderSys.assignVehicle(id, v.id);
+  const order = state.orders.find(o => o.id === id)!;
+  order.enRouteEvent = { eventId, triggerAt: Date.now() - 1000, resolved: false };
+  orderSys.tick(1); // 到点 → 触发
+  return order;
+};
+
+check('触发概率区间 40%-70%',
+  GAME_CONSTANTS.EN_ROUTE_TRIGGER_CHANCE_NORMAL === 0.4 &&
+  GAME_CONSTANTS.EN_ROUTE_TRIGGER_CHANCE_LONG === 0.7);
+
+// 25a. 修路「绕行」：耗时 +15s（直接改 statusEndAt）
+const oRoad = assignWithEvent('o_er_road', 'road_work');
+check('到点事件被触发', oRoad.enRouteEvent!.triggeredAt !== undefined);
+const endBeforeRoad = v.statusEndAt;
+check('决策成功（绕行）', orderSys.resolveEnRouteEvent('o_er_road', 0));
+check('绕行耗时 +15s', Math.abs(v.statusEndAt - endBeforeRoad - 15000) < 50,
+  `delta=${v.statusEndAt - endBeforeRoad}ms`);
+check('事件标记已决策', oRoad.enRouteEvent!.resolved && oRoad.enRouteEvent!.choiceIndex === 0);
+orderSys.completeOrder('o_er_road');
+
+// 25b. 好天气「赶路」：剩余耗时 ×0.85
+const oWeather = assignWithEvent('o_er_weather', 'good_weather');
+const nowBeforeWeather = Date.now();
+const remainBefore = v.statusEndAt - nowBeforeWeather;
+orderSys.resolveEnRouteEvent('o_er_weather', 0);
+const remainAfter = v.statusEndAt - nowBeforeWeather;
+check('赶路剩余耗时 ×0.85', Math.abs(remainAfter / remainBefore - 0.85) < 0.02,
+  `before=${remainBefore}ms after=${remainAfter}ms`);
+// 「慢行」：亲密度 +5（另起一单）
+orderSys.completeOrder('o_er_weather');
+v.intimacy = 50;
+const oSlow = assignWithEvent('o_er_slow', 'good_weather');
+orderSys.resolveEnRouteEvent('o_er_slow', 1);
+check('慢行亲密度 +5', v.intimacy === 55, `intimacy=${v.intimacy}`);
+orderSys.completeOrder('o_er_slow');
+
+// 25c. 爆胎「硬开」：磨损 +15；「换胎」零件不足不可选
+state.resources.parts = 0;
+const oTire = assignWithEvent('o_er_tire', 'flat_tire');
+const tireCfg = getEnRouteEventConfig('flat_tire')!;
+check('零件不足时换胎不可选', !orderSys.isEnRouteChoiceAvailable(tireCfg.choices[0], v));
+check('零件不足时换胎决策被拒', !orderSys.resolveEnRouteEvent('o_er_tire', 0));
+const wearBeforeTire = v.wear;
+orderSys.resolveEnRouteEvent('o_er_tire', 1);
+check('硬开磨损 +15', v.wear - wearBeforeTire === 15, `wear=${v.wear} before=${wearBeforeTire}`);
+state.resources.parts = 5;
+check('零件充足时换胎可选', orderSys.isEnRouteChoiceAvailable(tireCfg.choices[0], v));
+orderSys.completeOrder('o_er_tire');
+
+// 25d. 交警「出示年检」耐久≥4 门槛；默认项不可用时超时退到第一个可选项
+const policeCfg = getEnRouteEventConfig('police_check')!;
+v.stats.durability = 5;
+check('耐久≥4 可出示年检', orderSys.isEnRouteChoiceAvailable(policeCfg.choices[2], v));
+v.stats.durability = 2;
+check('耐久不足不可出示年检', !orderSys.isEnRouteChoiceAvailable(policeCfg.choices[2], v));
+// 注入一个 12 秒前已触发且未决策的事件 → tick 超时兜底；默认项（年检）不可用 → 退到「配合」+10s
+state.orders.push({
+  id: 'o_er_police', type: OrderType.Normal, tier: 1, baseReward: 100, expReward: 20, duration: 30,
+  assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
+});
+orderSys.assignVehicle('o_er_police', v.id);
+const oPolice = state.orders.find(o => o.id === 'o_er_police')!;
+oPolice.enRouteEvent = { eventId: 'police_check', triggerAt: Date.now() - 20000, triggeredAt: Date.now() - 12000, resolved: false };
+const endBeforePolice = v.statusEndAt;
+orderSys.tick(1);
+check('超时自动按默认项决策', oPolice.enRouteEvent!.resolved, '未自动决策');
+check('默认项不可用时退到「配合」', oPolice.enRouteEvent!.choiceIndex === 0,
+  `choiceIndex=${oPolice.enRouteEvent!.choiceIndex}`);
+check('配合耗时 +10s', Math.abs(v.statusEndAt - endBeforePolice - 10000) < 50,
+  `delta=${v.statusEndAt - endBeforePolice}ms`);
+orderSys.completeOrder('o_er_police');
+v.stats.durability = 5; // 还原
+
+// 25e. 超时默认项（可用时）：修路「等一等」+8s
+state.orders.push({
+  id: 'o_er_wait', type: OrderType.Normal, tier: 1, baseReward: 100, expReward: 20, duration: 30,
+  assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
+});
+orderSys.assignVehicle('o_er_wait', v.id);
+const oWait = state.orders.find(o => o.id === 'o_er_wait')!;
+oWait.enRouteEvent = { eventId: 'road_work', triggerAt: Date.now() - 20000, triggeredAt: Date.now() - 12000, resolved: false };
+const endBeforeWait = v.statusEndAt;
+orderSys.tick(1);
+check('超时默认项为「等一等」', oWait.enRouteEvent!.resolved && oWait.enRouteEvent!.choiceIndex === 2,
+  `choiceIndex=${oWait.enRouteEvent!.choiceIndex}`);
+check('等一等耗时 +8s', Math.abs(v.statusEndAt - endBeforeWait - 8000) < 50,
+  `delta=${v.statusEndAt - endBeforeWait}ms`);
+orderSys.completeOrder('o_er_wait');
+
+// 25f. 顺风车客「带上」：pendingRewardMult ×1.3 正确乘入结算（屏蔽暴击随机性）
+const realRandom = Math.random;
+Math.random = () => 0.99; // 不暴击；派单事件排定掷骰 0.99 也不排定（由注入代替）
+const runOrderIncome = (withMult: boolean): number => {
+  v.level = 5; v.exp = 0; v.wear = 0; v.consecutiveOrders = 0; v.lastOrderCompletedAt = 0;
+  const id = withMult ? 'o_er_mult' : 'o_er_base';
+  state.orders.push({
+    id, type: OrderType.Normal, tier: 1, baseReward: 100, expReward: 20, duration: 30,
+    assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
+  });
+  orderSys.assignVehicle(id, v.id);
+  const ord = state.orders.find(o => o.id === id)!;
+  ord.enRouteEvent = { eventId: 'hitchhiker', triggerAt: Date.now() - 1000, resolved: false };
+  orderSys.tick(1);
+  if (withMult) orderSys.resolveEnRouteEvent(id, 0); // 带上：收入 ×1.3
+  const goldBefore = state.resources.gold;
+  orderSys.completeOrder(id);
+  return state.resources.gold - goldBefore;
+};
+const incMult = runOrderIncome(true);
+const incBase = runOrderIncome(false);
+Math.random = realRandom;
+check('pendingRewardMult ×1.3 乘入结算', Math.abs(incMult / incBase - 1.3) < 0.02,
+  `mult=${incMult} base=${incBase}`);
+
+// 25g. 交警「塞红包」：金币 -本单期望收入 10%
+v.level = 5; v.exp = 0; v.wear = 0; v.consecutiveOrders = 0; v.lastOrderCompletedAt = 0;
+const estIncome = EconomySystem.calculateOrderIncome(
+  v, 100, 1.0, getGlobalIncomeMult(state), false, state, OrderType.Normal
+).income;
+const oBribe = assignWithEvent('o_er_bribe', 'police_check');
+const goldBeforeBribe = state.resources.gold;
+orderSys.resolveEnRouteEvent('o_er_bribe', 1);
+check('塞红包金币 -本单10%',
+  goldBeforeBribe - state.resources.gold === Math.floor(estIncome * 0.1),
+  `cost=${goldBeforeBribe - state.resources.gold} expect=${Math.floor(estIncome * 0.1)}`);
+orderSys.completeOrder('o_er_bribe');
+
+// 26. M5 提示条规则（computeHint 纯函数，不触碰 DOM）
+// 26a. 全新存档：默认提示造最高已解锁车型（T1 独轮车）
+const hs = SaveManager.createInitialState();
+const hsTech = new TechSystem(hs);
+const hsVehicleSys = new VehicleSystem(hs);
+hsVehicleSys.debugInstantBuild = true; // M7：测试用即时完成
+const hDefault = computeHint(hs, hsTech.getNextResearchable())!;
+check('提示条默认指向造车', hDefault.action.type === 'build', JSON.stringify(hDefault));
+
+// 26b. 科技可研究（条件+资源都满足）时优先级最高
+hs.resources.gold = 100_000;
+hs.resources.parts = 100_000;
+hs.techTree.producedCount[2] = 5; // L2 解锁条件：产 5 辆 T3 马车
+const hTech = computeHint(hs, hsTech.getNextResearchable())!;
+check('科技可研究优先提示', hTech.action.type === 'tab' && hTech.action.tab === 'tech', JSON.stringify(hTech));
+
+// 26c. 科技不可研究时：金品质满级+亲密度≥80 → 进化提示（指向车辆详情）
+hs.techTree.producedCount[2] = 0;
+const hv = hsVehicleSys.createVehicle(1)!;
+hv.trait = null;
+hv.quality = Quality.Gold;
+hv.level = GAME_CONSTANTS.MAX_VEHICLE_LEVEL;
+hv.intimacy = GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT;
+const hEvo = computeHint(hs, hsTech.getNextResearchable())!;
+check('可进化车辆提示', hEvo.action.type === 'vehicle' && hEvo.action.vehicleId === hv.id, JSON.stringify(hEvo));
+
+// 26d. 主力车磨损 ≥70 → 保养提示
+hv.isEvolved = true; // 摘掉进化提示
+hv.specialization = Specialization.Steady; // 摘掉专精提示（规则 4 优先于磨损）
+hv.wear = 75;
+const hWear = computeHint(hs, hsTech.getNextResearchable())!;
+check('主力车磨损提示', hWear.action.type === 'vehicle' && hWear.text.includes('磨损'), JSON.stringify(hWear));
+
+// 27. M7 时间化：建造队列 / 研究互斥 / 升品锁车 / 工厂 tier 系数
+
+// 27a. 建造队列：1 建造槽 + 3 排队位，满员拒绝；到点 tick 结算落地
+const qs = SaveManager.createInitialState();
+qs.resources.gold = 10_000_000;
+qs.resources.parts = 1_000_000;
+const qVehicleSys = new VehicleSystem(qs); // 不开 debug：走真实队列
+for (let i = 0; i < 4; i++) qVehicleSys.createVehicle(1);
+check('建造队列容量 = 1 槽 + 3 排队', qs.garage.buildQueue.length === 4,
+  `queue=${qs.garage.buildQueue.length}`);
+check('队列满后再造被拒', qVehicleSys.createVehicle(1) === null);
+qs.garage.buildQueue[0].finishAt = Date.now() - 1; // 直接拨到到点，结算
+qVehicleSys.tick(1);
+check('到点后车辆落地且队列前进', qs.garage.vehicles.length === 1 && qs.garage.buildQueue.length === 3,
+  `vehicles=${qs.garage.vehicles.length} queue=${qs.garage.buildQueue.length}`);
+check('建造占用未来车位', (() => {
+  qs.garage.maxCapacity = 4; // 1 辆现有 + 3 排队 = 满
+  return qVehicleSys.createVehicle(1) === null;
+})());
+
+// 27b. 研究互斥：主线/支线共享一个研究槽，开始即扣资源
+const rs = SaveManager.createInitialState();
+rs.resources.gold = 10_000_000;
+rs.resources.parts = 1_000_000;
+rs.techTree.producedCount[2] = 5; // L2 解锁条件
+const rTechSys = new TechSystem(rs);
+const goldBeforeResearch = rs.resources.gold;
+check('开始主线研究', rTechSys.researchNext());
+check('研究开始即扣资源', rs.resources.gold < goldBeforeResearch);
+check('研究中不能并行主线', !rTechSys.researchNext());
+rs.techTree.currentLevel = 2; // 假装 L2 已生效，让支线满足等级门槛
+check('研究中不能并行支线', !rTechSys.researchSideTech('lean_mfg'));
+rs.techTree.currentLevel = 1;
+check('研究完成前未生效', !rs.techTree.isResearched[1]);
+rs.techTree.researching!.finishAt = Date.now() - 1; // 拨到到点
+rTechSys.tick(1);
+check('研究到点生效', rs.techTree.isResearched[1] && rs.techTree.currentLevel === 2 && rs.techTree.researching === null);
+
+// 27c. 升品锁车：期间 Maintenance 不可派单，到点恢复 Idle
+const lockV = qs.garage.vehicles[0];
+lockV.ordersCompleted = GAME_CONSTANTS.QUALITY_BLUE_REQUIRED_ORDERS;
+qs.resources.gold = 10_000_000;
+qs.resources.parts = 1_000_000;
+const qOrderSys = new OrderSystem(qs);
+const lockOrder: import('../src/core/types').Order = {
+  id: 'o_lock', type: OrderType.Normal, tier: 1, baseReward: 10, expReward: 20, duration: 30,
+  assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
+};
+qs.orders.push(lockOrder);
+check('开始品质升级', qVehicleSys.upgradeQuality(lockV.id));
+check('升级期间锁定 Maintenance', lockV.status === VehicleStatus.Maintenance);
+check('升级期间不可接单', !qOrderSys.canVehicleTakeOrder(lockV.id, lockOrder));
+check('升级期间派单被拒', !qOrderSys.assignVehicle('o_lock', lockV.id));
+check('升级期间不能重复升级', !qVehicleSys.upgradeQuality(lockV.id));
+lockV.qualityUpgrade!.finishAt = Date.now() - 1; // 拨到到点
+qVehicleSys.tick(1);
+check('升级到点应用品质并恢复空闲',
+  lockV.quality === Quality.Blue && lockV.status === VehicleStatus.Idle && lockV.qualityUpgrade === null);
+check('升级完成后可接单', qOrderSys.canVehicleTakeOrder(lockV.id, lockOrder));
+
+// 27d. 工厂 tier 系数：产出 ×(1 + 最高车型 tier × 0.3)，空车库按 T1 计
+const fs2 = SaveManager.createInitialState();
+const fFactorySys = new FactorySystem(fs2);
+const ppsEmpty = fFactorySys.getPartsPerSecond(); // 空车库 → ×(1 + 1×0.3) = ×1.3
+check('空车库进度系数 ×1.3',
+  Math.abs(ppsEmpty / (GAME_CONSTANTS.FACTORY_BASE_RATE * 1.3) - 1) < 0.001,
+  `pps=${ppsEmpty}`);
+const fVehicleSys = new VehicleSystem(fs2);
+fVehicleSys.debugInstantBuild = true;
+fs2.resources.gold = 10_000_000;
+fs2.resources.parts = 1_000_000;
+fVehicleSys.createVehicle(4); // 车库最高 T4 → ×(1 + 4×0.3) = ×2.2
+const ppsT4 = fFactorySys.getPartsPerSecond();
+check('T4 进度系数比值 2.2/1.3', Math.abs(ppsT4 / ppsEmpty - 2.2 / 1.3) < 0.01,
+  `ratio=${ppsT4 / ppsEmpty}`);
 
 console.log(failures === 0 ? '\n全部通过 🎉' : `\n${failures} 项失败`);
 process.exit(failures === 0 ? 0 : 1);
