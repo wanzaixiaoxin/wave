@@ -7,8 +7,8 @@ import { GameLoop } from './core/GameLoop';
 import { EventBus } from './core/EventBus';
 import { SaveManager } from './core/SaveManager';
 import { GameEvent, GameState, Vehicle, Order, OfflineResult } from './core/types';
-import { getVehicleConfig, getUnlockedConfigs } from './config/VehicleConfig';
-import { GAME_CONSTANTS, buildEnergyCost, tierReputationGate } from './config/GameConstants';
+import { getVehicleConfig, getUnmetRequirements } from './config/VehicleConfig';
+import { GAME_CONSTANTS, buildEnergyCost } from './config/GameConstants';
 import { getEnRouteEventConfig } from './config/EnRouteEventConfig';
 
 import { setGameLoop, setRenderFn, requestRender, getState, getSystems } from './ui/context';
@@ -234,9 +234,10 @@ function bindUI(): void {
     const cfg = getVehicleConfig(tier);
     if (!cfg) return;
 
-    const unlocked = getUnlockedConfigs(s.techTree.currentLevel, s.techTree.producedCount);
-    if (!unlocked.find(c => c.tier === tier)) {
-      addLog(`❌ T${tier} ${cfg.name} 还未解锁（需要先在🔬科技树中研究）`);
+    // M9：时代差异化解锁矩阵（科技/工厂/电站/声望/产量），与 createVehicle 同一来源
+    const unmet = getUnmetRequirements(s, tier);
+    if (unmet.length > 0) {
+      addLog(`❌ T${tier} ${cfg.name} 还未解锁：${unmet.join(' · ')}`);
       return;
     }
     // 预留未来车位：现有 + 建造中 + 排队 占满则禁止入队
@@ -256,12 +257,7 @@ function bindUI(): void {
       addLog(`❌ 零件不足！需要 ${cfg.partsCost}⚙️`);
       return;
     }
-    // M8：市场准入（声望门槛）与动力（能源）校验，与 createVehicle 保持同一来源
-    const repGate = tierReputationGate(tier);
-    if (s.resources.reputation < repGate) {
-      addLog(`❌ 品牌声望不足！造 ${cfg.name} 需要 ${repGate.toLocaleString()}📈，多跑订单攒口碑`);
-      return;
-    }
+    // M8：动力（能源）校验，与 createVehicle 保持同一来源
     const energyCost = buildEnergyCost(tier);
     if (s.resources.energy < energyCost) {
       addLog(`❌ 能源不足！造车需要 ${energyCost}⚡，升级电站或等充电`);

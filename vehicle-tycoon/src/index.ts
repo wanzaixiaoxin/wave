@@ -12,7 +12,7 @@ export { SaveManager } from './core/SaveManager';
 export * from './core/types';
 
 // 配置表
-export { VEHICLE_CONFIGS, getVehicleConfig, getUnlockedConfigs } from './config/VehicleConfig';
+export { VEHICLE_CONFIGS, getVehicleConfig, getUnlockedConfigs, getUnmetRequirements } from './config/VehicleConfig';
 export { TECH_CONFIGS, getTechConfig } from './config/TechConfig';
 export { TRAIT_CONFIGS, rollTrait, getTraitConfig } from './config/TraitConfig';
 export { GAME_CONSTANTS, expForLevel, cumulativeExpForLevel, statUpgradeCost, garageExpandCost } from './config/GameConstants';

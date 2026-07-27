@@ -3,9 +3,9 @@
 // ============================================================
 
 import { getState, getSystems, requestRender } from './context';
-import { getUnlockedConfigs, getVehicleConfig } from '../config/VehicleConfig';
+import { VEHICLE_CONFIGS, getVehicleConfig, getUnmetRequirements } from '../config/VehicleConfig';
 import { TECH_CONFIGS, SIDE_TECH_CONFIGS } from '../config/TechConfig';
-import { GAME_CONSTANTS, buildEnergyCost, tierReputationGate } from '../config/GameConstants';
+import { GAME_CONSTANTS, buildEnergyCost } from '../config/GameConstants';
 import { showToast } from './toast';
 import { addLog } from './log';
 
@@ -76,15 +76,14 @@ export function buildTierOptions(): void {
   select.innerHTML = '';
 
   const s = getState();
-  const unlocked = getUnlockedConfigs(s.techTree.currentLevel, s.techTree.producedCount);
-  unlocked.forEach(cfg => {
+  // 全量列出车型：未解锁的置灰并展示全部缺失条件（M9 时代差异化矩阵）
+  VEHICLE_CONFIGS.forEach(cfg => {
     const opt = document.createElement('option');
     opt.value = cfg.tier.toString();
-    // 市场准入（M8）：声望未达标的车型在下拉里置灰展示门槛
-    const gate = tierReputationGate(cfg.tier);
-    if (s.resources.reputation < gate) {
+    const unmet = getUnmetRequirements(s, cfg.tier);
+    if (unmet.length > 0) {
       opt.disabled = true;
-      opt.textContent = `${cfg.emoji} ${cfg.name} 🔒 品牌声望不足（需 ${gate.toLocaleString()}📈）`;
+      opt.textContent = `${cfg.emoji} ${cfg.name} 🔒 ${unmet.join(' · ')}`;
     } else {
       const partsStr = cfg.partsCost > 0 ? ` + ${cfg.partsCost}⚙️` : '';
       opt.textContent = `${cfg.emoji} ${cfg.name} (${cfg.buildCost.toLocaleString()}🪙${partsStr} + ${buildEnergyCost(cfg.tier)}⚡)`;
@@ -106,23 +105,23 @@ export function renderWorkbench(): void {
   const btn = document.getElementById('btn-build') as HTMLButtonElement | null;
 
   // 建造槽/队列满，或车位（含预留）满 → 禁用制造按钮；
-  // 选中车型声望/能源不足（M8）→ 同样置灰并给出原因
+  // 选中车型未解锁（M9 矩阵）/能源不足（M8）→ 同样置灰并给出原因
   const queueFull = queue.length >= 1 + GAME_CONSTANTS.BUILD_QUEUE_MAX;
   const reservedFull = s.garage.vehicles.length + queue.length >= s.garage.maxCapacity;
   const selectedTier = parseInt(
     (document.getElementById('build-tier-select') as HTMLSelectElement | null)?.value ?? '0'
   );
-  const repGate = tierReputationGate(selectedTier);
-  const repShort = selectedTier > 0 && s.resources.reputation < repGate;
+  const unmet = selectedTier > 0 ? getUnmetRequirements(s, selectedTier) : [];
+  const locked = unmet.length > 0;
   const energyShort = selectedTier > 0 && s.resources.energy < buildEnergyCost(selectedTier);
   if (btn) {
-    btn.disabled = queueFull || reservedFull || repShort || energyShort;
+    btn.disabled = queueFull || reservedFull || locked || energyShort;
     btn.title = queueFull
       ? '建造队列已满，等造完再来'
       : reservedFull
         ? '车库已满（含建造中的车），请扩建或拆解'
-        : repShort
-          ? `品牌声望不足（需 ${repGate.toLocaleString()}📈），多跑订单攒口碑`
+        : locked
+          ? `还未解锁：${unmet.join(' · ')}`
           : energyShort
             ? `能源不足：造车需要 ${buildEnergyCost(selectedTier)}⚡，升级电站或等充电`
             : '';

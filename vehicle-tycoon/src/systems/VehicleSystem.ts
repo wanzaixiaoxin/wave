@@ -8,11 +8,11 @@ import {
   Quality, QUALITY_ORDER, qualityRank, VehicleStatus, TraitType, TalentType, Order,
   Specialization
 } from '../core/types';
-import { getVehicleConfig } from '../config/VehicleConfig';
+import { getVehicleConfig, getUnmetRequirements } from '../config/VehicleConfig';
 import { rollTrait, getTraitConfig } from '../config/TraitConfig';
 import {
   GAME_CONSTANTS, expForLevel, cumulativeExpForLevel,
-  statUpgradeCost, buildEnergyCost, tierReputationGate
+  statUpgradeCost, buildEnergyCost
 } from '../config/GameConstants';
 import { hasSideTech, getEffectivePartsCost } from './TechSystem';
 
@@ -56,8 +56,8 @@ export class VehicleSystem {
 
     if (this.state.garage.buildQueue.length >= 1 + GAME_CONSTANTS.BUILD_QUEUE_MAX) return null;
 
-    // 市场准入（M8）：高 tier 车型需要品牌声望门槛
-    if (this.state.resources.reputation < tierReputationGate(tier)) return null;
+    // 市场准入（M9）：时代差异化解锁矩阵（科技/工厂/电站/声望/产量，逐车型声明）
+    if (getUnmetRequirements(this.state, tier).length > 0) return null;
 
     if (this.state.resources.gold < config.buildCost) return null;
     const partsCost = getEffectivePartsCost(this.state, config.partsCost);

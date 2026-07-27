@@ -5,7 +5,7 @@
 // ============================================================
 
 import { GameState, Quality, qualityRank } from '../core/types';
-import { GAME_CONSTANTS, tierReputationGate } from '../config/GameConstants';
+import { GAME_CONSTANTS } from '../config/GameConstants';
 import { getUnlockedConfigs } from '../config/VehicleConfig';
 import { getTechConfig } from '../config/TechConfig';
 import { getState, getSystems } from './context';
@@ -106,9 +106,8 @@ export function computeHint(state: GameState, nextTech: NextTechInfo | null): Hi
     };
   }
 
-  // 6. 默认：攒钱造下一 tier 车型（已解锁且声望达标（M8）的最高 tier）
-  const unlocked = getUnlockedConfigs(state.techTree.currentLevel, state.techTree.producedCount)
-    .filter(c => state.resources.reputation >= tierReputationGate(c.tier));
+  // 6. 默认：攒钱造下一 tier 车型（时代差异化矩阵全维度已解锁（M9）的最高 tier）
+  const unlocked = getUnlockedConfigs(state);
   const target = unlocked[unlocked.length - 1];
   if (!target) return null;
   const remaining = target.buildCost - state.resources.gold;

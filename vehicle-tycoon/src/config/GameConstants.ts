@@ -168,7 +168,6 @@ export const GAME_CONSTANTS = {
   REP_ORDER_MULT_VALUABLE: 4,
   REP_EVOLVE: 100,                // 车辆进化 +100
   REP_FIRST_BUILD_PER_TIER: 20,   // 首台下线品牌效应：+20 × tier（每 tier 只发一次）
-  REP_TIER_GATE: [0, 0, 0, 0, 100, 250, 500, 1000, 2000, 5000, 6000], // 造车声望门槛（下标=tier，T1-3 免；T10 经 sim 校准 10000→6000，见 v1.2 方案 M8 章）
   REP_VALUABLE_COST: 10,          // 接贵重单动用客户关系：-10 声望
   MARKETING_GOLD_COST: 1000,      // 营销推广：1000🪙 买 2 分钟声望获取 ×2
   MARKETING_DURATION: 120,        // 营销 buff 持续（秒）
@@ -224,9 +223,4 @@ export function buildEnergyCost(tier: number): number {
 /** 每单耗电：订单 tier × (1 + 车辆速度属性 × 0.1)（派单时预扣） */
 export function orderEnergyCost(orderTier: number, speedStat: number): number {
   return orderTier * (1 + speedStat * GAME_CONSTANTS.ENERGY_ORDER_SPEED_FACTOR);
-}
-
-/** 造某 tier 车型所需的品牌声望门槛（T1-3 免） */
-export function tierReputationGate(tier: number): number {
-  return GAME_CONSTANTS.REP_TIER_GATE[tier] ?? 0;
 }

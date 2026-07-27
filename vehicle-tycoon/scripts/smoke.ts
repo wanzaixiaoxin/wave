@@ -7,7 +7,7 @@ import { EventSystem, getEventMultiplier } from '../src/systems/EventSystem';
 import { AchievementSystem } from '../src/systems/AchievementSystem';
 import { Quality, OrderType, TalentType, TraitType, VehicleStatus, OrderStatus, Specialization } from '../src/core/types';
 import { GAME_CONSTANTS, cumulativeExpForLevel } from '../src/config/GameConstants';
-import { getVehicleConfig } from '../src/config/VehicleConfig';
+import { getVehicleConfig, getUnmetRequirements } from '../src/config/VehicleConfig';
 import { FactorySystem } from '../src/systems/FactorySystem';
 import { TechSystem, getEffectivePartsCost } from '../src/systems/TechSystem';
 import { IntimacySystem } from '../src/systems/IntimacySystem';
@@ -63,7 +63,9 @@ state.activeEvents.length = 0;
 state.resources.gold = 10_000_000;
 state.resources.parts = 1_000_000;
 state.resources.energy = 1_000_000;     // M8：批量造车/派单耗电，测试充满
-state.resources.reputation = 100_000;   // M8：绕过 tier 声望门槛（门槛见 28 组专项断言）
+state.resources.reputation = 100_000;   // M8/M9：绕过声望门槛
+state.techTree.currentLevel = 2;        // M9：T4/T5 需科技 L2
+state.factory.level = 3;                // M9：T5 需工厂 L3
 const truck = vehicleSys.createVehicle(5)!;
 truck.trait = null; truck.isEvolved = true;
 const truckIncome = EconomySystem.calculateOrderIncome(truck, 100, 1.0, globalMult, false, state, OrderType.Normal).income;
@@ -131,6 +133,8 @@ const highOrder: import('../src/core/types').Order = {
 };
 v.quality = Quality.Blue; // T1 蓝品质独轮车
 check('T1 蓝品质车不能接 T8 贵重单', !orderSys.canVehicleTakeOrder(v.id, highOrder));
+state.techTree.currentLevel = 4;  // M9：T8 需科技 L4
+state.factory.powerLevel = 4;     // M9：T8 需电站 L4
 const plane = vehicleSys.createVehicle(8)!;
 plane.trait = null; plane.quality = Quality.Blue;
 check('T8 蓝品质车可以接 T8 贵重单', orderSys.canVehicleTakeOrder(plane.id, highOrder));
@@ -224,6 +228,7 @@ techSys.debugInstantResearch = true; // M7：测试用即时完成
 state.resources.gold = 10_000_000;
 state.resources.parts = 1_000_000;
 state.resources.energy = 1_000_000; // M8：补充测试耗电
+state.techTree.currentLevel = 1;  // 还原主线等级（前面为造高 tier 车临时抬高）
 check('主线不足不能研究支线', !techSys.researchSideTech('archive')); // 需要 L3，当前 L1
 state.techTree.currentLevel = 3;
 check('研究精益制造', techSys.researchSideTech('lean_mfg'));
@@ -499,7 +504,8 @@ fVehicleSys.debugInstantBuild = true;
 fs2.resources.gold = 10_000_000;
 fs2.resources.parts = 1_000_000;
 fs2.resources.energy = 1_000_000;    // M8：造 T4 需 80⚡
-fs2.resources.reputation = 100_000;  // M8：绕过 T4 声望门槛
+fs2.resources.reputation = 100_000;  // M8/M9：绕过 T4 声望门槛
+fs2.techTree.currentLevel = 2;       // M9：T4 需科技 L2
 fVehicleSys.createVehicle(4); // 车库最高 T4 → ×(1 + 4×0.3) = ×2.2
 const ppsT4 = fFactorySys.getPartsPerSecond();
 check('T4 进度系数比值 2.2/1.3', Math.abs(ppsT4 / ppsEmpty - 2.2 / 1.3) < 0.01,
@@ -548,7 +554,7 @@ check('同 tier 再造不重复发首台声望', bs.resources.reputation === 20,
 bs.resources.energy = 4;
 check('能源不足禁止造车入队', bVehicle.createVehicle(1) === null);
 
-// 28c. tier 声望门槛拦截（单一来源：createVehicle）
+// 28c. 解锁矩阵拦截（单一来源：createVehicle → getUnmetRequirements）
 const gs = SaveManager.createInitialState();
 const gVehicle = new VehicleSystem(gs);
 gVehicle.debugInstantBuild = true;
@@ -556,8 +562,10 @@ gs.resources.gold = 10_000_000;
 gs.resources.parts = 1_000_000;
 gs.resources.energy = 1_000_000;
 check('声望 0 造 T4 被门槛拦截', gVehicle.createVehicle(4) === null);
-gs.resources.reputation = GAME_CONSTANTS.REP_TIER_GATE[4];
-check('声望达标可造 T4', gVehicle.createVehicle(4) !== null);
+gs.techTree.currentLevel = 2; // M9：T4 需科技 L2 + 声望 100
+check('仅科技达标仍被声望拦截', gVehicle.createVehicle(4) === null);
+gs.resources.reputation = 100;
+check('科技+声望达标可造 T4', gVehicle.createVehicle(4) !== null);
 check('T4 首台声望 +80', bs.resources.reputation === 20
   && gs.resources.reputation === 100 + 80, `rep=${gs.resources.reputation}`);
 
@@ -699,6 +707,90 @@ check('离线 10s 电站按速率累积', Math.abs(offState.resources.energy - G
   `energy=${offState.resources.energy}`);
 SaveManager.applyOfflineEarnings(offState, { offlineSeconds: 7200, carsProduced: 0, goldEarned: 0, partsEarned: 0 });
 check('离线能源充到上限停产', offState.resources.energy === 100, `energy=${offState.resources.energy}`);
+
+// 29. M9 时代差异化解锁矩阵：产量（作坊）/ 工厂（工业）/ 电站（电气）/ T10 全维度联合
+const mkRichState = () => {
+  const st = SaveManager.createInitialState();
+  st.resources.gold = 10_000_000;
+  st.resources.parts = 1_000_000;
+  st.resources.energy = 1_000_000;
+  const vs = new VehicleSystem(st);
+  vs.debugInstantBuild = true;
+  return { st, vs };
+};
+
+// 29a. 手工作坊时代：T3 靠产量（产 3 辆 T2 马车前置）
+{
+  const { st, vs } = mkRichState();
+  check('T3 产量不足被拦截', vs.createVehicle(3) === null);
+  st.techTree.producedCount[1] = 2;
+  check('T3 产量 2/3 仍被拦截', vs.createVehicle(3) === null);
+  st.techTree.producedCount[1] = 3;
+  check('T3 产量达标解锁', vs.createVehicle(3) !== null);
+}
+
+// 29b. 工业时代：T5 靠工厂等级（科技 L2 + 工厂 L3 + 声望 250）
+{
+  const { st, vs } = mkRichState();
+  st.techTree.currentLevel = 2;
+  st.resources.reputation = 250;
+  st.factory.level = 2;
+  check('T5 工厂 L2/3 被拦截', vs.createVehicle(5) === null);
+  st.factory.level = 3;
+  check('T5 工厂达标解锁', vs.createVehicle(5) !== null);
+}
+
+// 29c. 电气时代：T8 靠电站等级（科技 L4 + 电站 L4 + 声望 2000）
+{
+  const { st, vs } = mkRichState();
+  st.techTree.currentLevel = 4;
+  st.resources.reputation = 2000;
+  st.factory.powerLevel = 3;
+  check('T8 电站 L3/4 被拦截', vs.createVehicle(8) === null);
+  st.factory.powerLevel = 4;
+  check('T8 电站达标解锁', vs.createVehicle(8) !== null);
+}
+
+// 29d. T10 全维度联合判定（科技 L5 + 工厂 L9 + 电站 L8 + 声望 6000，缺一不可）
+{
+  const { st, vs } = mkRichState();
+  st.techTree.currentLevel = 5;
+  st.factory.level = 9;
+  st.factory.powerLevel = 8;
+  st.resources.reputation = 6000;
+  check('T10 全维度达标解锁', getUnmetRequirements(st, 10).length === 0);
+  st.resources.reputation = 5999;
+  check('T10 声望差 1 被拦截', vs.createVehicle(10) === null);
+  st.resources.reputation = 6000;
+  st.factory.powerLevel = 7;
+  check('T10 电站差 1 级被拦截', vs.createVehicle(10) === null);
+  st.factory.powerLevel = 8;
+  st.factory.level = 8;
+  check('T10 工厂差 1 级被拦截', vs.createVehicle(10) === null);
+  st.factory.level = 9;
+  st.techTree.currentLevel = 4;
+  check('T10 科技差 1 级被拦截', vs.createVehicle(10) === null);
+}
+
+// 29e. getUnmetRequirements 返回完整缺失列表（而非只返回第一条），进行中的条件带进度
+{
+  const st = SaveManager.createInitialState();
+  const unmet = getUnmetRequirements(st, 10);
+  check('T10 缺失列表含全部 4 项', unmet.length === 4, unmet.join(' | '));
+  check('缺失列表覆盖科技/工厂/电站/声望',
+    unmet.some(s => s.includes('科技')) && unmet.some(s => s.includes('工厂'))
+    && unmet.some(s => s.includes('电站')) && unmet.some(s => s.includes('声望')),
+    unmet.join(' | '));
+  st.factory.level = 7;
+  check('缺失条件带进度（工厂 Lv.7/9）',
+    getUnmetRequirements(st, 10).some(s => s.includes('Lv.7/9')),
+    getUnmetRequirements(st, 10).join(' | '));
+  st.techTree.producedCount[0] = 1;
+  check('产量条件带进度（1/3）',
+    getUnmetRequirements(st, 2).some(s => s.includes('1/3')),
+    getUnmetRequirements(st, 2).join(' | '));
+  check('T1 初始可用（无缺失）', getUnmetRequirements(st, 1).length === 0);
+}
 
 console.log(failures === 0 ? '\n全部通过 🎉' : `\n${failures} 项失败`);
 process.exit(failures === 0 ? 0 : 1);

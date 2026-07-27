@@ -5,9 +5,14 @@
 // - basePrice 约 ×2.7/tier 增长（收入端）
 // - buildCost ≈ basePrice × 回本单数（1→20 递增，成本端 ×4.3/tier）
 // - 收入增速 < 成本增速 → 每 tier 停留时间递增，避免滚雪球式膨胀
+//
+// 解锁矩阵（M9 时代差异化依赖，逐车型声明于 unlock 字段）：
+// - 手工作坊时代（T2/T3）：靠产量（手艺积累）
+// - 工业时代（T4-T7）：靠科技 + 工厂等级（产线设备），声望自 T4 起贯穿
+// - 电气/航天时代（T8-T10）：靠科技 + 电站等级（能源与精密制造）+ 声望
 // ============================================================
 
-import { VehicleConfigEntry, TalentType } from '../core/types';
+import { GameState, VehicleConfigEntry, TalentType } from '../core/types';
 
 export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
   {
@@ -19,7 +24,7 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     buildTime: 2,
     parkingSpaces: 1,
     partsCost: 0,
-    unlockCondition: { type: 'initial' },
+    unlock: {},
     evolvedName: '涡轮独轮车',
     talentType: TalentType.Agile,
     talentDesc: '订单完成速度 +20%',
@@ -33,7 +38,7 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     buildTime: 4,
     parkingSpaces: 1,
     partsCost: 0,
-    unlockCondition: { type: 'produce_count', targetTier: 1, targetCount: 3 },
+    unlock: { produceTier: 1, produceCount: 3 },
     evolvedName: '电动自行车',
     talentType: TalentType.Endurance,
     talentDesc: '可连续接 2 单',
@@ -47,7 +52,7 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     buildTime: 6,
     parkingSpaces: 1,
     partsCost: 0,
-    unlockCondition: { type: 'produce_count', targetTier: 2, targetCount: 3 },
+    unlock: { produceTier: 2, produceCount: 3 },
     evolvedName: '豪华马车',
     talentType: TalentType.Noble,
     talentDesc: '长途/贵重订单收入 +30%',
@@ -61,7 +66,7 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     buildTime: 10,
     parkingSpaces: 2,
     partsCost: 20,
-    unlockCondition: { type: 'tech_level', techLevel: 2 },
+    unlock: { techLevel: 2, reputation: 100 },
     evolvedName: '跑车',
     talentType: TalentType.Speedster,
     talentDesc: '短途订单收入 ×2',
@@ -75,7 +80,7 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     buildTime: 17,
     parkingSpaces: 2,
     partsCost: 60,
-    unlockCondition: { type: 'produce_count', targetTier: 4, targetCount: 4 },
+    unlock: { techLevel: 2, factoryLevel: 3, reputation: 250 },
     evolvedName: '擎天柱',
     talentType: TalentType.Hauler,
     talentDesc: '单次收入 +50%',
@@ -89,7 +94,7 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     buildTime: 30,
     parkingSpaces: 2,
     partsCost: 200,
-    unlockCondition: { type: 'tech_level', techLevel: 3 },
+    unlock: { techLevel: 3, factoryLevel: 4, reputation: 500 },
     evolvedName: '磁悬浮列车',
     talentType: TalentType.Convoy,
     talentDesc: '同型车每多 1 辆 +5% 收入',
@@ -103,7 +108,7 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     buildTime: 42,
     parkingSpaces: 3,
     partsCost: 600,
-    unlockCondition: { type: 'produce_count', targetTier: 6, targetCount: 3 },
+    unlock: { techLevel: 3, factoryLevel: 5, reputation: 1000 },
     evolvedName: '豪华邮轮',
     talentType: TalentType.Explorer,
     talentDesc: '每次订单额外获得零件',
@@ -117,7 +122,7 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     buildTime: 75,
     parkingSpaces: 3,
     partsCost: 2000,
-    unlockCondition: { type: 'tech_level', techLevel: 4 },
+    unlock: { techLevel: 4, powerLevel: 4, reputation: 2000 },
     evolvedName: '超音速客机',
     talentType: TalentType.Network,
     talentDesc: '所有订单刷新速度 +30%',
@@ -131,7 +136,7 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     buildTime: 120,
     parkingSpaces: 4,
     partsCost: 4000,
-    unlockCondition: { type: 'produce_count', targetTier: 8, targetCount: 2 },
+    unlock: { techLevel: 4, factoryLevel: 7, powerLevel: 6, reputation: 5000 },
     evolvedName: '可回收重型火箭',
     talentType: TalentType.Stellar,
     talentDesc: '零件产出 +50%',
@@ -145,7 +150,7 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     buildTime: 200,
     parkingSpaces: 4,
     partsCost: 12000,
-    unlockCondition: { type: 'tech_level', techLevel: 5 },
+    unlock: { techLevel: 5, factoryLevel: 9, powerLevel: 8, reputation: 6000 },
     evolvedName: '超光速飞船',
     talentType: TalentType.Warp,
     talentDesc: '全车型收入 +15%（最多叠 2 层）',
@@ -160,25 +165,44 @@ export function getVehicleConfig(tier: number): VehicleConfigEntry | undefined {
 }
 
 /**
- * 获取已解锁的车辆配置（根据科技等级和产量计数）
+ * 时代差异化解锁判定（M9）— 单一数据源：
+ * createVehicle 入队校验、造车下拉置灰、提示条过滤全部走这里。
+ * 返回所有未满足条件的可读描述（进行中的条件带「当前/目标」进度），空数组 = 可解锁。
  */
-export function getUnlockedConfigs(
-  techLevel: number,
-  producedCounts: number[]
-): VehicleConfigEntry[] {
-  return VEHICLE_CONFIGS.filter(config => {
-    const cond = config.unlockCondition;
-    switch (cond.type) {
-      case 'initial':
-        return true;
-      case 'tech_level':
-        return techLevel >= (cond.techLevel ?? 99);
-      case 'produce_count': {
-        const count = cond.targetTier ? producedCounts[cond.targetTier - 1] ?? 0 : 0;
-        return count >= (cond.targetCount ?? 0);
-      }
-      default:
-        return false;
+export function getUnmetRequirements(state: GameState, tier: number): string[] {
+  const config = getVehicleConfig(tier);
+  if (!config) return ['未知车型'];
+  const u = config.unlock;
+  const unmet: string[] = [];
+
+  if (u.techLevel && state.techTree.currentLevel < u.techLevel) {
+    unmet.push(`需 科技 L${u.techLevel}`);
+  }
+  if (u.factoryLevel && state.factory.level < u.factoryLevel) {
+    unmet.push(`需 工厂 Lv.${state.factory.level}/${u.factoryLevel}`);
+  }
+  if (u.powerLevel && state.factory.powerLevel < u.powerLevel) {
+    unmet.push(`需 电站 Lv.${state.factory.powerLevel}/${u.powerLevel}`);
+  }
+  if (u.reputation && state.resources.reputation < u.reputation) {
+    const cur = Math.floor(state.resources.reputation);
+    unmet.push(cur > 0 ? `需 声望 ${cur.toLocaleString()}/${u.reputation.toLocaleString()}` : `需 声望 ${u.reputation.toLocaleString()}`);
+  }
+  if (u.produceTier && u.produceCount) {
+    const cur = state.techTree.producedCount[u.produceTier - 1] ?? 0;
+    if (cur < u.produceCount) {
+      const target = getVehicleConfig(u.produceTier);
+      unmet.push(cur > 0
+        ? `需 生产 ${target?.name ?? 'T' + u.produceTier} ${cur}/${u.produceCount} 辆`
+        : `需 生产 ${target?.name ?? 'T' + u.produceTier} ×${u.produceCount}`);
     }
-  });
+  }
+  return unmet;
+}
+
+/**
+ * 获取已解锁的车辆配置（时代差异化矩阵全维度判定）
+ */
+export function getUnlockedConfigs(state: GameState): VehicleConfigEntry[] {
+  return VEHICLE_CONFIGS.filter(c => getUnmetRequirements(state, c.tier).length === 0);
 }

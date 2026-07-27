@@ -377,11 +377,17 @@ export interface VehicleConfigEntry {
   buildTime: number;
   parkingSpaces: number;
   partsCost: number;
-  unlockCondition: {
-    type: 'initial' | 'produce_count' | 'tech_level';
-    targetTier?: number;
-    targetCount?: number;
-    techLevel?: number;
+  /**
+   * 时代差异化解锁需求（M9）：全部字段可选，缺省 = 无要求；空对象 = 初始可用。
+   * 手工作坊时代靠产量，工业时代靠工厂等级，电气/航天时代靠电站等级，声望自内燃机时代起贯穿。
+   */
+  unlock: {
+    techLevel?: number;      // 科技主线等级
+    factoryLevel?: number;   // 工厂等级
+    powerLevel?: number;     // 电站等级
+    reputation?: number;     // 品牌声望
+    produceTier?: number;    // 需累计生产某车型
+    produceCount?: number;   // …N 辆
   };
   evolvedName: string;
   talentType: TalentType;

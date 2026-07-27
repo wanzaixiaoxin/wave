@@ -17,9 +17,9 @@ import { EconomySystem } from '../src/systems/EconomySystem';
 import { IntimacySystem } from '../src/systems/IntimacySystem';
 import { EventBus } from '../src/core/EventBus';
 import { GameEvent, Order, Vehicle } from '../src/core/types';
-import { getUnlockedConfigs } from '../src/config/VehicleConfig';
+import { getUnlockedConfigs, getVehicleConfig } from '../src/config/VehicleConfig';
 import { getEnRouteEventConfig } from '../src/config/EnRouteEventConfig';
-import { buildEnergyCost, tierReputationGate } from '../src/config/GameConstants';
+import { buildEnergyCost } from '../src/config/GameConstants';
 
 const state = SaveManager.createInitialState();
 const vehicleSys = new VehicleSystem(state);
@@ -91,6 +91,22 @@ for (let t = 0; t < SIM_HOURS * 3600; t++) {
     factorySys.upgradePower();
   }
 
+  // 3c. 时代差异化门槛（M9）：下一档车型卡工厂/电站等级时，按需优先补（门槛是硬卡点）
+  const curTopTier = state.garage.vehicles.length > 0
+    ? Math.max(...state.garage.vehicles.map(v => v.tier)) : 0;
+  const nextCfg = getVehicleConfig(Math.min(curTopTier + 1, 10));
+  if (nextCfg) {
+    const u = nextCfg.unlock;
+    if (u.factoryLevel && state.factory.level < u.factoryLevel) {
+      const cost = factorySys.getUpgradeCost();
+      if (cost > 0 && state.resources.gold >= cost) factorySys.upgradeFactory();
+    }
+    if (u.powerLevel && state.factory.powerLevel < u.powerLevel) {
+      const cost = factorySys.getPowerUpgradeCost();
+      if (cost > 0 && state.resources.gold >= cost) factorySys.upgradePower();
+    }
+  }
+
   // 3b. 营销推广（M8：冷却一好就用；留 3 倍金币缓冲，不挤占研究/造车经费）
   if (state.resources.gold > 3000) orderSys.runMarketing();
 
@@ -101,13 +117,12 @@ for (let t = 0; t < SIM_HOURS * 3600; t++) {
 
   // 5. 造车：新 tier 必买（升级时刻）；资金充裕时补充/更新车队（含解锁条件的产量打磨）
   // M7：建造入队后占「未来车位」，车队规模按 现有 + 建造中/排队 计算
-  // M8：叠加声望门槛（市场准入）与能源预算
-  const unlocked = getUnlockedConfigs(state.techTree.currentLevel, state.techTree.producedCount);
+  // M9：解锁判定走时代差异化矩阵（含科技/工厂/电站/声望/产量），叠加能源预算
+  const unlocked = getUnlockedConfigs(state);
   const topTier = state.garage.vehicles.length > 0
     ? Math.max(...state.garage.vehicles.map(v => v.tier)) : 0;
   const reservedSize = state.garage.vehicles.length + state.garage.buildQueue.length;
   const candidates = unlocked.filter(c => {
-    if (state.resources.reputation < tierReputationGate(c.tier)) return false; // M8 声望门槛
     if (state.resources.energy < buildEnergyCost(c.tier)) return false;        // M8 能源预算
     if (state.resources.parts < c.partsCost) return false;
     if (c.tier > topTier) return state.resources.gold >= c.buildCost * 1.2; // 新 tier：升级时刻
