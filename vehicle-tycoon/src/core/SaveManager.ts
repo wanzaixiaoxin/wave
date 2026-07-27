@@ -7,9 +7,10 @@ import { GameEvent, SaveData, OfflineResult, GameState, ChallengeRank, OrderType
 import { GAME_CONSTANTS } from '../config/GameConstants';
 import { getVehicleConfig } from '../config/VehicleConfig';
 import { EconomySystem, getGlobalIncomeMult } from '../systems/EconomySystem';
+import { getUpgradeMult } from '../systems/UpgradeSystem';
 
 const SAVE_KEY = 'tycoon_save_v1';
-const SAVE_VERSION = '1.2'; // 1.2：M8 经济维度扩展（能源 ⚡ + 声望 📈）；老档不迁移，版本不匹配直接开新局
+const SAVE_VERSION = '1.3'; // 1.3：科技与工厂深度扩展（子科技/支线 3 阶/改造线）；老档不迁移，版本不匹配直接开新局
 const MAX_OFFLINE_SECONDS = 2 * 3600; // 2 hours
 const OFFLINE_EFFICIENCY = 0.4;
 
@@ -74,13 +75,13 @@ export class SaveManager {
   static calculateOfflineEarnings(state: GameState, offlineSeconds: number): OfflineResult {
     const effectiveSeconds = Math.min(offlineSeconds, MAX_OFFLINE_SECONDS);
 
-    // 零件：产线持续产出
+    // 零件：产线持续产出（含产线自动化改造倍率，v1.3 统一乘区）
     const factory = state.factory;
     const lineCount = factory.productionLines.filter(l => l.isActive).length;
     const level = factory.level;
     const baseRate = GAME_CONSTANTS.FACTORY_BASE_RATE;
     const levelMult = 1 + (level - 1) * GAME_CONSTANTS.FACTORY_RATE_GROWTH;
-    const pps = lineCount * baseRate * levelMult;
+    const pps = lineCount * baseRate * levelMult * getUpgradeMult(state, 'parts_rate');
     const partsEarned = pps * effectiveSeconds * OFFLINE_EFFICIENCY;
 
     // 金币：车辆持续跑单（按期望收入 / 普通单时长估算 EPS）
@@ -110,13 +111,17 @@ export class SaveManager {
   static applyOfflineEarnings(state: GameState, result: OfflineResult): void {
     state.resources.gold += result.goldEarned;
     state.resources.parts += result.partsEarned;
-    // 离线期间电站按真实时间持续产电（M8），到储存上限停产
+    // 离线期间电站按真实时间持续产电（M8），到储存上限停产（含能效/储能改造倍率，v1.3）
     const powerMult = 1 + (state.factory.powerLevel - 1) * GAME_CONSTANTS.POWER_RATE_GROWTH;
     const techBoost = state.techTree.currentLevel >= 3 ? 1 + GAME_CONSTANTS.TECH_SPEED_BOOST : 1.0;
-    const cap = GAME_CONSTANTS.POWER_CAPACITY_PER_LEVEL * state.factory.powerLevel;
+    const cap = Math.floor(
+      GAME_CONSTANTS.POWER_CAPACITY_PER_LEVEL * state.factory.powerLevel *
+      getUpgradeMult(state, 'power_cap')
+    );
     state.resources.energy = Math.min(
       cap,
-      state.resources.energy + GAME_CONSTANTS.POWER_BASE_RATE * powerMult * techBoost * result.offlineSeconds
+      state.resources.energy + GAME_CONSTANTS.POWER_BASE_RATE * powerMult * techBoost *
+        getUpgradeMult(state, 'power_rate') * result.offlineSeconds
     );
     state.stats.totalGoldEarned += result.goldEarned;
     state.stats.offlineTime += result.offlineSeconds;
@@ -180,6 +185,7 @@ export class SaveManager {
         overclockUntil: 0,
         overclockCooldownUntil: 0,
         powerLevel: 1,   // 新开局送 1 级电站（M8）
+        retrofits: {},   // 改造线等级（v1.3）
       },
       orders: [],
       techTree: {
@@ -187,6 +193,7 @@ export class SaveManager {
         isResearched: [false, false, false, false, false],
         producedCount: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         sideTechs: {},
+        subTechs: {},
         researching: null,
       },
       activeEvents: [],

@@ -20,6 +20,8 @@ import { GameEvent, Order, Vehicle } from '../src/core/types';
 import { getUnlockedConfigs, getVehicleConfig } from '../src/config/VehicleConfig';
 import { getEnRouteEventConfig } from '../src/config/EnRouteEventConfig';
 import { buildEnergyCost } from '../src/config/GameConstants';
+import { SUB_TECH_CONFIGS, RETROFIT_CONFIGS } from '../src/config/UpgradeConfig';
+import { SIDE_TECH_CONFIGS, getTechConfig } from '../src/config/TechConfig';
 
 const state = SaveManager.createInitialState();
 const vehicleSys = new VehicleSystem(state);
@@ -80,6 +82,40 @@ for (let t = 0; t < SIM_HOURS * 3600; t++) {
   // 2. 研究科技（有钱有条件就研究）
   techSys.researchNext();
 
+  // 2b. 子科技/支线逐阶投入（v1.3）：主线优先——主线条件已满足时留槽给主线攒钱；
+  // 主线在打磨产量条件（或已满级）的空窗期，才按性价比填研究槽。
+  // 性价比规则：预留下一级主线的全部费用后，仍有 2 倍本项费用的余量才投（机会成本感知）
+  if (!state.techTree.researching) {
+    const next = techSys.getNextResearchable();
+    const mainReady = next !== null && next.conditionMet;
+    if (!mainReady) {
+      const nextCfg = next ? getTechConfig(next.level) : undefined;
+      const reserveGold = (nextCfg?.goldCost ?? 0);
+      const reserveParts = (nextCfg?.partsCost ?? 0);
+      const surplusGold = state.resources.gold - reserveGold;
+      const surplusParts = state.resources.parts - reserveParts;
+      const candidates: Array<{ gold: number; research: () => boolean }> = [];
+      for (const cfg of SUB_TECH_CONFIGS) {
+        const st = techSys.getSubTechState(cfg.id);
+        if (st.unlocked && st.rank < 3 && st.canAfford
+          && surplusGold >= st.goldCost * 2
+          && surplusParts >= st.partsCost * 2) {
+          candidates.push({ gold: st.goldCost, research: () => techSys.researchSubTech(cfg.id) });
+        }
+      }
+      for (const cfg of SIDE_TECH_CONFIGS) {
+        const st = techSys.getSideTechState(cfg.id);
+        if (st.levelMet && st.rank < st.maxRank && st.canAfford
+          && surplusGold >= st.goldCost * 2
+          && surplusParts >= st.partsCost * 2) {
+          candidates.push({ gold: st.goldCost, research: () => techSys.researchSideTech(cfg.id) });
+        }
+      }
+      candidates.sort((a, b) => a.gold - b.gold);
+      candidates[0]?.research();
+    }
+  }
+
   // 3. 升级工厂与电站（M8：按需升电站——储备偏低或金币富余时优先补动力）
   if (state.resources.gold > economySys.getNetWorth() * 0.5) {
     factorySys.upgradeFactory();
@@ -109,6 +145,24 @@ for (let t = 0; t < SIM_HOURS * 3600; t++) {
 
   // 3b. 营销推广（M8：冷却一好就用；留 3 倍金币缓冲，不挤占研究/造车经费）
   if (state.resources.gold > 3000) orderSys.runMarketing();
+
+  // 3d. 工厂/电站改造线（v1.3）：金币富余时按性价比（最便宜的下一级）投入，
+  // 同样预留下一级主线费用 + 2 倍本项费用的余量，避免挤占研究/造车经费
+  {
+    const next = techSys.getNextResearchable();
+    const nextCfg = next ? getTechConfig(next.level) : undefined;
+    const surplusGold = state.resources.gold - (nextCfg?.goldCost ?? 0);
+    const surplusParts = state.resources.parts - (nextCfg?.partsCost ?? 0);
+    if (surplusGold > 0 && state.resources.gold > economySys.getNetWorth() * 0.3) {
+      const affordable = RETROFIT_CONFIGS
+        .map(cfg => ({ cfg, st: factorySys.getRetrofitState(cfg.id) }))
+        .filter(x => x.st.cost !== null
+          && surplusGold >= x.st.cost.gold * 2
+          && surplusParts >= x.st.cost.parts * 2)
+        .sort((a, b) => a.st.cost!.gold - b.st.cost!.gold);
+      if (affordable.length > 0) factorySys.buyRetrofit(affordable[0].cfg.id);
+    }
+  }
 
   // 4. 保养磨损车
   for (const v of state.garage.vehicles) {
@@ -197,3 +251,16 @@ console.log(`声望收支（M8）: 获取 ${Math.floor(repGained).toLocaleString
 console.log(`动力不足订单: ${lowPowerOrders}（占 ${(lowPowerOrders / Math.max(1, state.stats.totalOrdersCompleted) * 100).toFixed(1)}%）· 能源归零 ${energyZeroSeconds}s`);
 console.log(`总订单数: ${state.stats.totalOrdersCompleted}`);
 console.log(`车库: ${state.garage.vehicles.map(v => 'T' + v.tier).join(', ')}`);
+// v1.3 深度升级结算：子科技/支线阶数与改造线等级
+const subStr = SUB_TECH_CONFIGS
+  .map(c => `${c.name}${state.techTree.subTechs[c.id] ?? 0}`)
+  .join(' ');
+const sideStr = SIDE_TECH_CONFIGS
+  .map(c => `${c.name}${state.techTree.sideTechs[c.id] ?? 0}`)
+  .join(' ');
+const retrofitStr = RETROFIT_CONFIGS
+  .map(c => `${c.name}${state.factory.retrofits[c.id] ?? 0}`)
+  .join(' ');
+console.log(`子科技阶数: ${subStr}`);
+console.log(`支线阶数: ${sideStr}`);
+console.log(`改造线等级: ${retrofitStr}`);

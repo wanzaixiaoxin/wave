@@ -14,7 +14,8 @@ import { getEnRouteEventConfig, rollEnRouteEvent } from '../config/EnRouteEventC
 import { GAME_CONSTANTS, orderEnergyCost } from '../config/GameConstants';
 import { EconomySystem, getGlobalIncomeMult } from './EconomySystem';
 import { getEventMultiplier } from './EventSystem';
-import { hasSideTech } from './TechSystem';
+import { getSideTechRank } from './TechSystem';
+import { getUpgradeMult } from './UpgradeSystem';
 
 export class OrderSystem {
   private state: GameState;
@@ -46,9 +47,10 @@ export class OrderSystem {
     if (this.hasEvolvedTalent(TalentType.Network)) {
       genInterval *= GAME_CONSTANTS.TALENT_NETWORK_REFRESH_MULT;
     }
-    // 辅助科技「物流优化」：订单生成间隔 ×0.8
-    if (hasSideTech(this.state, 'logistics')) {
-      genInterval *= GAME_CONSTANTS.SIDE_LOGISTICS_INTERVAL_MULT;
+    // 辅助科技「物流优化」（v1.3 3 阶制）：订单生成间隔 ×(1 - 7%×阶数)
+    const logisticsRank = getSideTechRank(this.state, 'logistics');
+    if (logisticsRank > 0) {
+      genInterval *= 1 - GAME_CONSTANTS.SIDE_LOGISTICS_INTERVAL_PER_RANK * logisticsRank;
     }
     const maxPending = 3 + this.state.techTree.currentLevel;
     if (this.orderGenTimer >= genInterval) {
@@ -229,8 +231,10 @@ export class OrderSystem {
     vehicle.status = VehicleStatus.OnOrder;
 
     // 每单耗电（M8）：订单tier × (1 + 速度 × 0.1)，派单时预扣；
+    // 高效燃烧/曲率引擎子科技（v1.3 统一乘区）逐阶降低耗电；
     // 能源不足不锁单，扣到 0 为止，本次订单耗时 ×1.5（动力不足惩罚）
-    const energyNeed = orderEnergyCost(order.tier, vehicle.stats.speed);
+    const energyNeed = orderEnergyCost(order.tier, vehicle.stats.speed) *
+      getUpgradeMult(this.state, 'order_energy');
     const energyPaid = Math.min(this.state.resources.energy, energyNeed);
     this.state.resources.energy -= energyPaid;
     if (energyPaid < energyNeed) {
@@ -262,6 +266,8 @@ export class OrderSystem {
     if (order.lowPower) {
       duration *= GAME_CONSTANTS.ENERGY_SHORTAGE_DURATION_MULT;
     }
+    // 物流网络子科技（v1.3 统一乘区）：订单耗时 -5%/阶
+    duration *= getUpgradeMult(this.state, 'order_duration');
     const departAt = Date.now();
     vehicle.statusEndAt = departAt + duration * 1000;
 
@@ -431,13 +437,15 @@ export class OrderSystem {
       this.state.stats.totalOrdersCompleted++;
 
       // 品牌声望（M8）：订单tier × 类型系数（普通1/长途2/贵重4），营销推广期间 ×2
+      // 品牌运营/深空网络子科技（v1.3 统一乘区）：声望获取 +10%/+15% 每阶
       const repMultMap: Record<OrderType, number> = {
         [OrderType.Normal]: GAME_CONSTANTS.REP_ORDER_MULT_NORMAL,
         [OrderType.LongDistance]: GAME_CONSTANTS.REP_ORDER_MULT_LONG,
         [OrderType.Valuable]: GAME_CONSTANTS.REP_ORDER_MULT_VALUABLE,
       };
       this.state.resources.reputation += Math.floor(
-        order.tier * repMultMap[order.type] * getEventMultiplier(this.state, 'reputation_mult')
+        order.tier * repMultMap[order.type] * getEventMultiplier(this.state, 'reputation_mult') *
+        getUpgradeMult(this.state, 'rep_gain')
       );
 
       // 经验由 VehicleSystem 监听 ORDER_COMPLETED 后统一走 addExp() 处理
@@ -471,9 +479,10 @@ export class OrderSystem {
       vehicle.status = VehicleStatus.Idle;
       vehicle.statusEndAt = 0;
 
-      // 磨损累积（稳健专精减半）与疲劳计数
+      // 磨损累积（稳健专精减半；质控体系子科技 v1.3 统一乘区逐阶 -10%）与疲劳计数
       const wearGain = GAME_CONSTANTS.WEAR_PER_ORDER *
-        (vehicle.specialization === Specialization.Steady ? GAME_CONSTANTS.SPEC_STEADY_WEAR_MULT : 1);
+        (vehicle.specialization === Specialization.Steady ? GAME_CONSTANTS.SPEC_STEADY_WEAR_MULT : 1) *
+        getUpgradeMult(this.state, 'wear');
       vehicle.wear = Math.min(GAME_CONSTANTS.WEAR_MAX, vehicle.wear + wearGain);
       vehicle.consecutiveOrders++;
       vehicle.lastOrderCompletedAt = now;

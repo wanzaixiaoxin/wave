@@ -8,8 +8,10 @@ import { AchievementSystem } from '../src/systems/AchievementSystem';
 import { Quality, OrderType, TalentType, TraitType, VehicleStatus, OrderStatus, Specialization } from '../src/core/types';
 import { GAME_CONSTANTS, cumulativeExpForLevel } from '../src/config/GameConstants';
 import { getVehicleConfig, getUnmetRequirements } from '../src/config/VehicleConfig';
-import { FactorySystem } from '../src/systems/FactorySystem';
-import { TechSystem, getEffectivePartsCost } from '../src/systems/TechSystem';
+import { FactorySystem, getBuildQueueMax } from '../src/systems/FactorySystem';
+import { TechSystem, getEffectivePartsCost, getSideTechRank } from '../src/systems/TechSystem';
+import { getUpgradeMult, getSubTechRank, getRetrofitLevel } from '../src/systems/UpgradeSystem';
+import type { UpgradeEffectKey } from '../src/core/types';
 import { IntimacySystem } from '../src/systems/IntimacySystem';
 import { getEnRouteEventConfig } from '../src/config/EnRouteEventConfig';
 import { computeHint } from '../src/ui/hint';
@@ -222,7 +224,7 @@ check('超负荷产出 ×2', Math.abs(ppsOc / ppsBefore - GAME_CONSTANTS.FACTORY
   `before=${ppsBefore} oc=${ppsOc}`);
 check('冷却中不可重复激活', !factorySys.activateOverclock());
 
-// 23. 辅助科技：等级门槛、研究、折扣、传承加成、回收加成
+// 23. 辅助科技（v1.3：3 阶制）：等级门槛、逐阶研究、折扣、传承加成、回收加成
 const techSys = new TechSystem(state);
 techSys.debugInstantResearch = true; // M7：测试用即时完成
 state.resources.gold = 10_000_000;
@@ -231,28 +233,31 @@ state.resources.energy = 1_000_000; // M8：补充测试耗电
 state.techTree.currentLevel = 1;  // 还原主线等级（前面为造高 tier 车临时抬高）
 check('主线不足不能研究支线', !techSys.researchSideTech('archive')); // 需要 L3，当前 L1
 state.techTree.currentLevel = 3;
-check('研究精益制造', techSys.researchSideTech('lean_mfg'));
-check('重复研究被拒', !techSys.researchSideTech('lean_mfg'));
-check('精益制造零件折扣 ×0.75', getEffectivePartsCost(state, 100) === 75);
-check('研究技术档案', techSys.researchSideTech('archive'));
+check('研究精益制造 1 阶', techSys.researchSideTech('lean_mfg'));
+check('精益制造 1 阶零件折扣 ×0.91', getEffectivePartsCost(state, 100) === 91);
+check('研究精益制造 2 阶', techSys.researchSideTech('lean_mfg'));
+check('研究精益制造 3 阶', techSys.researchSideTech('lean_mfg'));
+check('满阶后重复研究被拒', !techSys.researchSideTech('lean_mfg'));
+check('精益制造 3 阶零件折扣 ×0.73', getEffectivePartsCost(state, 100) === 73);
+check('研究技术档案 1 阶', techSys.researchSideTech('archive'));
 
 const donor2 = vehicleSys.createVehicle(1)!;
 donor2.trait = null;
 vehicleSys.addExp(donor2.id, cumulativeExpForLevel(3));
 const lifetime2 = cumulativeExpForLevel(donor2.level) + donor2.exp;
-const expected2 = Math.floor(lifetime2 * (GAME_CONSTANTS.INHERIT_EXP_RATIO + GAME_CONSTANTS.SIDE_ARCHIVE_INHERIT_BONUS));
+const expected2 = Math.floor(lifetime2 * (GAME_CONSTANTS.INHERIT_EXP_RATIO + GAME_CONSTANTS.SIDE_ARCHIVE_INHERIT_PER_RANK));
 const poolB2 = state.garage.inheritanceExp;
 vehicleSys.scrapVehicle(donor2.id);
-check('技术档案传承比例 0.65', state.garage.inheritanceExp - poolB2 === expected2,
+check('技术档案 1 阶传承比例 0.56', state.garage.inheritanceExp - poolB2 === expected2,
   `delta=${state.garage.inheritanceExp - poolB2} expect=${expected2}`);
 
-check('研究回收工艺', techSys.researchSideTech('recycling'));
+check('研究回收工艺 1 阶', techSys.researchSideTech('recycling'));
 const donor3 = vehicleSys.createVehicle(1)!;
 const goldB3 = state.resources.gold;
 const t1BuildCost = getVehicleConfig(1)!.buildCost;
 vehicleSys.scrapVehicle(donor3.id);
-check('回收工艺拆解返还 50%', state.resources.gold - goldB3 === Math.floor(t1BuildCost * GAME_CONSTANTS.SIDE_RECYCLING_SCRAP_GOLD),
-  `delta=${state.resources.gold - goldB3} expect=${Math.floor(t1BuildCost * 0.5)}`);
+check('回收工艺 1 阶拆解返还 37%', state.resources.gold - goldB3 === Math.floor(t1BuildCost * (0.3 + GAME_CONSTANTS.SIDE_RECYCLING_SCRAP_PER_RANK)),
+  `delta=${state.resources.gold - goldB3} expect=${Math.floor(t1BuildCost * 0.37)}`);
 
 // 24. 新成就条件：科技/工厂/支线
 const achieveSys = new AchievementSystem(state);
@@ -791,6 +796,156 @@ const mkRichState = () => {
     getUnmetRequirements(st, 2).join(' | '));
   check('T1 初始可用（无缺失）', getUnmetRequirements(st, 1).length === 0);
 }
+
+// 30. v1.3 科技与工厂深度扩展：统一倍率入口 / 子科技 / 支线 3 阶 / 改造线 / L5 队列里程碑
+
+// 30a. 统一倍率入口：无任何升级时全 effectKey 为 1
+const ALL_EFFECT_KEYS: UpgradeEffectKey[] = [
+  'build_time', 'build_cost', 'order_energy', 'rep_gain', 'order_duration',
+  'wear', 'parts_rate', 'power_rate', 'power_cap', 'first_produce_rep',
+];
+const us = SaveManager.createInitialState();
+check('统一倍率入口默认全 1', ALL_EFFECT_KEYS.every(k => getUpgradeMult(us, k) === 1));
+
+// 30b. 子科技研究流程：前置主线等级 → 逐阶 → 满阶拒绝（instant 模式）
+const uTech = new TechSystem(us);
+uTech.debugInstantResearch = true;
+us.resources.gold = 10_000_000;
+us.resources.parts = 1_000_000;
+check('主线等级不足时子科技被拒', !uTech.researchSubTech('efficient_combustion')); // 需 L2，当前 L1
+check('L1 子科技 1 阶研究成功', uTech.researchSubTech('better_tools'));
+check('子科技阶数为 1', getSubTechRank(us, 'better_tools') === 1);
+check('build_time 1 阶 ×0.94', Math.abs(getUpgradeMult(us, 'build_time') - 0.94) < 1e-9);
+uTech.researchSubTech('better_tools');
+uTech.researchSubTech('better_tools');
+check('build_time 3 阶 ×0.82', Math.abs(getUpgradeMult(us, 'build_time') - 0.82) < 1e-9,
+  `mult=${getUpgradeMult(us, 'build_time')}`);
+check('子科技满阶后再研被拒', !uTech.researchSubTech('better_tools'));
+
+// 30c. 子科技费用逐阶递增（配置 80/160/320）
+const goldBeforeSub = us.resources.gold;
+us.techTree.subTechs['craft_legacy'] = 0;
+uTech.researchSubTech('craft_legacy');
+check('子科技 1 阶扣 80🪙', goldBeforeSub - us.resources.gold === 80,
+  `delta=${goldBeforeSub - us.resources.gold}`);
+check('first_produce_rep 1 阶 ×1.2', Math.abs(getUpgradeMult(us, 'first_produce_rep') - 1.2) < 1e-9);
+
+// 30d. 研究槽互斥：主线/子科技/支线共享一个槽（非 instant 模式）
+const ms = SaveManager.createInitialState();
+ms.resources.gold = 10_000_000;
+ms.resources.parts = 1_000_000;
+ms.techTree.producedCount[2] = 5; // L2 解锁条件
+const mTech = new TechSystem(ms); // 不开 instant：走真实研究槽
+check('开始主线 L2 研究占槽', mTech.researchNext());
+check('主线研究中子科技互斥', !mTech.researchSubTech('better_tools'));
+ms.techTree.researching!.finishAt = Date.now() - 1;
+mTech.tick(1);
+check('子科技开始研究占槽', mTech.researchSubTech('better_tools'));
+check('子科技研究中主线互斥', !mTech.researchNext());
+check('子科技研究中支线互斥', !mTech.researchSideTech('lean_mfg'));
+ms.techTree.researching!.finishAt = Date.now() - 1;
+mTech.tick(1);
+check('子科技到点 +1 阶', getSubTechRank(ms, 'better_tools') === 1 && ms.techTree.researching === null);
+
+// 30e. 多来源叠加：子科技（×0.82）× 装配工艺改造 lv2（×0.88）累乘
+us.factory.retrofits['assembly'] = 2;
+check('build_time 多来源累乘 0.82×0.88',
+  Math.abs(getUpgradeMult(us, 'build_time') - 0.82 * 0.88) < 1e-9,
+  `mult=${getUpgradeMult(us, 'build_time')}`);
+
+// 30f. 各 effectKey 来源断言（子科技逐阶线性）
+us.techTree.isResearched = [true, true, true, true, true]; // 直接解锁全部主线等级
+us.techTree.currentLevel = 5;
+uTech.researchSubTech('efficient_combustion');
+check('order_energy 1 阶 ×0.92', Math.abs(getUpgradeMult(us, 'order_energy') - 0.92) < 1e-9);
+uTech.researchSubTech('brand_ops');
+uTech.researchSubTech('brand_ops');
+check('rep_gain 2 阶 ×1.2', Math.abs(getUpgradeMult(us, 'rep_gain') - 1.2) < 1e-9);
+uTech.researchSubTech('quality_control');
+check('wear 1 阶 ×0.9', Math.abs(getUpgradeMult(us, 'wear') - 0.9) < 1e-9);
+uTech.researchSubTech('logistics_network');
+check('order_duration 1 阶 ×0.95', Math.abs(getUpgradeMult(us, 'order_duration') - 0.95) < 1e-9);
+uTech.researchSubTech('bulk_purchase');
+check('build_cost 1 阶 ×0.92', Math.abs(getUpgradeMult(us, 'build_cost') - 0.92) < 1e-9);
+uTech.researchSubTech('warp_engine');
+check('order_energy 多来源累乘 0.92×0.9',
+  Math.abs(getUpgradeMult(us, 'order_energy') - 0.92 * 0.9) < 1e-9,
+  `mult=${getUpgradeMult(us, 'order_energy')}`);
+uTech.researchSubTech('deep_space_net');
+check('rep_gain 多来源累乘 1.2×1.15',
+  Math.abs(getUpgradeMult(us, 'rep_gain') - 1.2 * 1.15) < 1e-9);
+
+// 30g. 改造线：购买流程、扣资源、effectKey 生效
+const rs30 = SaveManager.createInitialState();
+const rFactory = new FactorySystem(rs30);
+check('金币不足改造被拒', !rFactory.buyRetrofit('automation'));
+rs30.resources.gold = 10000;
+rs30.resources.parts = 1000;
+check('产线自动化改造购买成功', rFactory.buyRetrofit('automation'));
+check('改造扣金币+零件', rs30.resources.gold === 9000 && rs30.resources.parts === 940,
+  `gold=${rs30.resources.gold} parts=${rs30.resources.parts}`);
+check('改造等级为 1', getRetrofitLevel(rs30, 'automation') === 1);
+check('parts_rate lv1 ×1.15', Math.abs(getUpgradeMult(rs30, 'parts_rate') - 1.15) < 1e-9);
+check('工厂产出含改造倍率',
+  Math.abs(rFactory.getPartsPerSecond() / (GAME_CONSTANTS.FACTORY_BASE_RATE * 1.3) - 1.15) < 0.001,
+  `pps=${rFactory.getPartsPerSecond()}`);
+check('能效优化改造购买成功', rFactory.buyRetrofit('power_efficiency'));
+check('power_rate lv1 ×1.12', Math.abs(getUpgradeMult(rs30, 'power_rate') - 1.12) < 1e-9);
+check('电站产出含改造倍率',
+  Math.abs(rFactory.getEnergyPerSecond() - GAME_CONSTANTS.POWER_BASE_RATE * 1.12) < 1e-9,
+  `rate=${rFactory.getEnergyPerSecond()}`);
+rFactory.buyRetrofit('power_storage');
+rFactory.buyRetrofit('power_storage');
+check('power_cap lv2 ×1.5', Math.abs(getUpgradeMult(rs30, 'power_cap') - 1.5) < 1e-9);
+check('储能上限含改造倍率', rFactory.getEnergyCapacity() === 150,
+  `cap=${rFactory.getEnergyCapacity()}`);
+rs30.factory.retrofits['lean_production'] = 1;
+check('build_cost 改造 lv1 ×0.94', Math.abs(getUpgradeMult(rs30, 'build_cost') - 0.94) < 1e-9);
+rs30.factory.retrofits['assembly'] = 5;
+check('改造满级后购买被拒', !rFactory.buyRetrofit('assembly'));
+
+// 30h. 消费方走统一乘区：造车金币/耗时折扣、首台下线声望加成
+const cs30 = SaveManager.createInitialState();
+cs30.resources.gold = 10_000_000;
+cs30.resources.parts = 1_000_000;
+cs30.resources.energy = 1_000_000;
+cs30.factory.retrofits['lean_production'] = 1;   // 造车金币 ×0.94
+cs30.factory.retrofits['assembly'] = 5;          // 建造耗时 ×0.7
+cs30.techTree.subTechs['craft_legacy'] = 1;      // 首台声望 ×1.2
+const cVehicle = new VehicleSystem(cs30); // 不开 instant：检查 BuildJob
+const goldB30 = cs30.resources.gold;
+const job30 = cVehicle.createVehicle(1) as import('../src/core/types').BuildJob;
+check('造车金币走 build_cost 乘区（10×0.94=9）', goldB30 - cs30.resources.gold === 9,
+  `delta=${goldB30 - cs30.resources.gold}`);
+check('建造耗时走 build_time 乘区（2×0.7≈1s）', job30.totalTime === 1,
+  `totalTime=${job30.totalTime}`);
+check('首台下线声望走 first_produce_rep 乘区（20×1.2=24）',
+  cs30.resources.reputation === 0, '尚未落地不应有声望');
+cs30.garage.buildQueue[0].finishAt = Date.now() - 1;
+cVehicle.tick(1);
+check('落地后首台声望 24', cs30.resources.reputation === 24,
+  `rep=${cs30.resources.reputation}`);
+
+// 30i. 工厂 L5 里程碑：建造排队位 3 → 4
+const qs30 = SaveManager.createInitialState();
+check('工厂 L1 排队位 3', getBuildQueueMax(qs30) === 3);
+qs30.factory.level = 4;
+check('工厂 L4 排队位仍 3', getBuildQueueMax(qs30) === 3);
+qs30.factory.level = 5;
+check('工厂 L5 排队位 +1', getBuildQueueMax(qs30) === 4);
+qs30.resources.gold = 10_000_000;
+qs30.resources.parts = 1_000_000;
+const qVehicle30 = new VehicleSystem(qs30); // 不开 instant：走真实队列
+for (let i = 0; i < 5; i++) qVehicle30.createVehicle(1);
+check('L5 队列容量 = 1 槽 + 4 排队', qs30.garage.buildQueue.length === 5,
+  `queue=${qs30.garage.buildQueue.length}`);
+check('L5 队列满后再造被拒', qVehicle30.createVehicle(1) === null);
+
+// 30j. 支线 3 阶总效果 ≥ 原一次性效果
+check('物流优化 3 阶 ≥ 原效果', 1 - 0.07 * 3 <= 0.8 + 1e-9);
+check('技术档案 3 阶 ≥ 原效果', 0.06 * 3 >= 0.15);
+check('回收工艺 3 阶 ≥ 原效果', 0.3 + 0.07 * 3 >= 0.5);
+check('支线阶数查询', getSideTechRank(us, 'lean_mfg') === 0);
 
 console.log(failures === 0 ? '\n全部通过 🎉' : `\n${failures} 项失败`);
 process.exit(failures === 0 ? 0 : 1);

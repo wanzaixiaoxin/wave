@@ -126,11 +126,15 @@ export const GAME_CONSTANTS = {
   QUALITY_UPGRADE_TIME_BLUE: 60,            // 品质升级耗时：白→蓝（秒）
   QUALITY_UPGRADE_TIME_GOLD: 180,           // 品质升级耗时：蓝→金（秒）
 
-  // ===== 辅助科技（支线）效果 =====
-  SIDE_LOGISTICS_INTERVAL_MULT: 0.8,  // 物流优化：订单生成间隔 ×0.8
-  SIDE_LEAN_PARTS_MULT: 0.75,         // 精益制造：造车零件消耗 ×0.75
-  SIDE_ARCHIVE_INHERIT_BONUS: 0.15,   // 技术档案：传承比例 +15 个百分点
-  SIDE_RECYCLING_SCRAP_GOLD: 0.5,     // 回收工艺：拆解金币返还 30%→50%
+  // ===== 辅助科技（支线）效果（v1.3：3 阶制，效果 = 每阶量 × 阶数） =====
+  SIDE_LOGISTICS_INTERVAL_PER_RANK: 0.07, // 物流优化：订单生成间隔每阶 -7%（3 阶 -21% ≈ 原 ×0.8）
+  SIDE_LEAN_PARTS_PER_RANK: 0.09,         // 精益制造：造车零件消耗每阶 -9%（3 阶 -27% ≈ 原 ×0.75）
+  SIDE_ARCHIVE_INHERIT_PER_RANK: 0.06,    // 技术档案：传承比例每阶 +6 个百分点（3 阶 +18% ≥ 原 15%）
+  SIDE_RECYCLING_SCRAP_PER_RANK: 0.07,    // 回收工艺：拆解金币返还每阶 +7%（3 阶 51% ≥ 原 50%）
+
+  // ===== 工厂里程碑（v1.3） =====
+  FACTORY_QUEUE_BONUS_LEVEL: 5,  // 工厂达到该等级时建造排队位 +1（3→4）
+  FACTORY_QUEUE_BONUS: 1,
 
   // ===== 路上事件（M1） =====
   EN_ROUTE_TRIGGER_CHANCE_NORMAL: 0.4,  // 普通/贵重单触发概率

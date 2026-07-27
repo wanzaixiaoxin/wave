@@ -3,6 +3,7 @@
 // ============================================================
 
 import { TechConfigEntry, SideTechConfigEntry } from '../core/types';
+import { GAME_CONSTANTS } from './GameConstants';
 
 export const TECH_CONFIGS: TechConfigEntry[] = [
   {
@@ -57,45 +58,58 @@ export function getTechConfig(level: number): TechConfigEntry | undefined {
 }
 
 // ============================================================
-// 辅助科技（支线）— 主线等级达标后可独立研究，永久被动加成
+// 辅助科技（支线）— 主线等级达标后可逐阶研究（3 阶制），永久被动加成
+// 效果逐阶线性叠加，3 阶总效果 ≥ 原一次性效果；费用逐阶递增
 // ============================================================
 
 export const SIDE_TECH_CONFIGS: SideTechConfigEntry[] = [
   {
     id: 'logistics',
     name: '物流优化',
-    description: '订单生成间隔 -20%',
+    description: '订单生成间隔每阶 -7%',
     requiredLevel: 2,
-    goldCost: 3000,
-    partsCost: 50,
-    effect: '订单生成间隔 ×0.8',
+    maxRank: 3,
+    effectKey: 'order_interval',
+    valuePerRank: -GAME_CONSTANTS.SIDE_LOGISTICS_INTERVAL_PER_RANK,
+    goldCosts: [3000, 6000, 12000],
+    partsCosts: [50, 100, 200],
+    effect: '订单生成间隔 ×(1 - 7%×阶数)',
   },
   {
     id: 'lean_mfg',
     name: '精益制造',
-    description: '造车零件消耗 -25%',
+    description: '造车零件消耗每阶 -9%',
     requiredLevel: 2,
-    goldCost: 4000,
-    partsCost: 80,
-    effect: '造车零件消耗 ×0.75',
+    maxRank: 3,
+    effectKey: 'parts_cost',
+    valuePerRank: -GAME_CONSTANTS.SIDE_LEAN_PARTS_PER_RANK,
+    goldCosts: [4000, 8000, 16000],
+    partsCosts: [80, 160, 320],
+    effect: '造车零件消耗 ×(1 - 9%×阶数)',
   },
   {
     id: 'archive',
     name: '技术档案',
-    description: '拆解传承比例 +15%',
+    description: '拆解传承比例每阶 +6%',
     requiredLevel: 3,
-    goldCost: 12000,
-    partsCost: 200,
-    effect: '传承比例 50% → 65%',
+    maxRank: 3,
+    effectKey: 'inherit_ratio',
+    valuePerRank: GAME_CONSTANTS.SIDE_ARCHIVE_INHERIT_PER_RANK,
+    goldCosts: [12000, 24000, 48000],
+    partsCosts: [200, 400, 800],
+    effect: '传承比例 50% + 6%×阶数',
   },
   {
     id: 'recycling',
     name: '回收工艺',
-    description: '拆解金币返还 30%→50%',
+    description: '拆解金币返还每阶 +7%',
     requiredLevel: 3,
-    goldCost: 15000,
-    partsCost: 250,
-    effect: '拆解金币返还 ×50%',
+    maxRank: 3,
+    effectKey: 'scrap_gold',
+    valuePerRank: GAME_CONSTANTS.SIDE_RECYCLING_SCRAP_PER_RANK,
+    goldCosts: [15000, 30000, 60000],
+    partsCosts: [250, 500, 1000],
+    effect: '拆解金币返还 30% + 7%×阶数',
   },
 ];
 

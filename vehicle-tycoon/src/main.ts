@@ -10,6 +10,8 @@ import { GameEvent, GameState, Vehicle, Order, OfflineResult } from './core/type
 import { getVehicleConfig, getUnmetRequirements } from './config/VehicleConfig';
 import { GAME_CONSTANTS, buildEnergyCost } from './config/GameConstants';
 import { getEnRouteEventConfig } from './config/EnRouteEventConfig';
+import { getBuildQueueMax } from './systems/FactorySystem';
+import { getUpgradeMult } from './systems/UpgradeSystem';
 
 import { setGameLoop, setRenderFn, requestRender, getState, getSystems } from './ui/context';
 import { getTraitName, pickRandomNames } from './ui/format';
@@ -245,12 +247,12 @@ function bindUI(): void {
       addLog(`❌ 车库已满（${s.garage.maxCapacity} 格，含建造中的车），请先扩建或送走一辆车`);
       return;
     }
-    if (s.garage.buildQueue.length >= 1 + GAME_CONSTANTS.BUILD_QUEUE_MAX) {
-      addLog(`❌ 建造队列已满（建造槽 + ${GAME_CONSTANTS.BUILD_QUEUE_MAX} 个排队位），等造完再来`);
+    if (s.garage.buildQueue.length >= 1 + getBuildQueueMax(s)) {
+      addLog(`❌ 建造队列已满（建造槽 + ${getBuildQueueMax(s)} 个排队位），等造完再来`);
       return;
     }
-    if (s.resources.gold < cfg.buildCost) {
-      addLog(`❌ 金币不足！需要 ${cfg.buildCost}🪙，当前 ${s.resources.gold}🪙`);
+    if (s.resources.gold < Math.floor(cfg.buildCost * getUpgradeMult(s, 'build_cost'))) {
+      addLog(`❌ 金币不足！需要 ${Math.floor(cfg.buildCost * getUpgradeMult(s, 'build_cost'))}🪙，当前 ${s.resources.gold}🪙`);
       return;
     }
     if (s.resources.parts < cfg.partsCost) {
@@ -266,7 +268,10 @@ function bindUI(): void {
 
     const result = getSystems().vehicleSys.createVehicle(tier);
     if (result) {
-      addLog(`🔧 ${cfg.emoji}${cfg.name} 已开工，预计 ${cfg.buildTime} 秒后出厂（-${cfg.buildCost}🪙）`);
+      // v1.3：显示统一乘区后的实际造价与耗时
+      const effCost = Math.floor(cfg.buildCost * getUpgradeMult(s, 'build_cost'));
+      const effTime = Math.max(1, Math.round(cfg.buildTime * getUpgradeMult(s, 'build_time')));
+      addLog(`🔧 ${cfg.emoji}${cfg.name} 已开工，预计 ${effTime} 秒后出厂（-${effCost}🪙）`);
     }
     requestRender();
   };

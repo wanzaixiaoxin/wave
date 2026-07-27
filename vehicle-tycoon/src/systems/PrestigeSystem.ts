@@ -141,6 +141,7 @@ export class PrestigeSystem {
     this.state.factory.overclockUntil = 0;
     this.state.factory.overclockCooldownUntil = 0;
     this.state.factory.powerLevel = 1; // M8：轮回后电站回到 1 级
+    this.state.factory.retrofits = {}; // v1.3：轮回后改造线清零
     for (let i = 0; i < (bonuses.extraLines ?? 0); i++) {
       this.state.factory.productionLines.push({
         index: this.state.factory.productionLines.length,
@@ -153,6 +154,7 @@ export class PrestigeSystem {
       isResearched: [false, false, false, false, false],
       producedCount: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       sideTechs: {},
+      subTechs: {},
       researching: null,
     };
     this.state.activeEvents = [];

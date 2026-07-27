@@ -5,7 +5,10 @@
 import { getState, getSystems, requestRender } from './context';
 import { VEHICLE_CONFIGS, getVehicleConfig, getUnmetRequirements } from '../config/VehicleConfig';
 import { TECH_CONFIGS, SIDE_TECH_CONFIGS } from '../config/TechConfig';
+import { getSubTechsOfLevel, RETROFIT_CONFIGS } from '../config/UpgradeConfig';
 import { GAME_CONSTANTS, buildEnergyCost } from '../config/GameConstants';
+import { getBuildQueueMax } from '../systems/FactorySystem';
+import { getUpgradeMult } from '../systems/UpgradeSystem';
 import { showToast } from './toast';
 import { addLog } from './log';
 
@@ -86,7 +89,9 @@ export function buildTierOptions(): void {
       opt.textContent = `${cfg.emoji} ${cfg.name} 🔒 ${unmet.join(' · ')}`;
     } else {
       const partsStr = cfg.partsCost > 0 ? ` + ${cfg.partsCost}⚙️` : '';
-      opt.textContent = `${cfg.emoji} ${cfg.name} (${cfg.buildCost.toLocaleString()}🪙${partsStr} + ${buildEnergyCost(cfg.tier)}⚡)`;
+      // v1.3：显示统一乘区后的实际造价（批量采购/精益生产）
+      const effCost = Math.floor(cfg.buildCost * getUpgradeMult(s, 'build_cost'));
+      opt.textContent = `${cfg.emoji} ${cfg.name} (${effCost.toLocaleString()}🪙${partsStr} + ${buildEnergyCost(cfg.tier)}⚡)`;
     }
     select.appendChild(opt);
   });
@@ -106,7 +111,7 @@ export function renderWorkbench(): void {
 
   // 建造槽/队列满，或车位（含预留）满 → 禁用制造按钮；
   // 选中车型未解锁（M9 矩阵）/能源不足（M8）→ 同样置灰并给出原因
-  const queueFull = queue.length >= 1 + GAME_CONSTANTS.BUILD_QUEUE_MAX;
+  const queueFull = queue.length >= 1 + getBuildQueueMax(s);
   const reservedFull = s.garage.vehicles.length + queue.length >= s.garage.maxCapacity;
   const selectedTier = parseInt(
     (document.getElementById('build-tier-select') as HTMLSelectElement | null)?.value ?? '0'
@@ -241,6 +246,55 @@ export function renderFactory(): void {
       pNextEl.textContent = '⚡ 电站已满级';
     }
   }
+
+  // ---------- 工厂/电站改造（v1.3）：即时购买生效，不占研究槽 ----------
+  renderRetrofits('factory-retrofits', 'factory');
+  renderRetrofits('power-retrofits', 'power');
+}
+
+/** 改造线区块：等级圆点 + 效果 + 下一级费用 + 购买按钮 */
+function renderRetrofits(containerId: string, kind: 'factory' | 'power'): void {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = '';
+
+  const s = getState();
+  const fs = getSystems().factorySys;
+  for (const cfg of RETROFIT_CONFIGS.filter(r => r.kind === kind)) {
+    const st = fs.getRetrofitState(cfg.id);
+    const pips = '●'.repeat(st.level) + '○'.repeat(st.maxLevel - st.level);
+    const maxed = st.cost === null;
+    const costText = maxed
+      ? 'MAX'
+      : st.cost!.parts > 0
+        ? `${st.cost!.gold.toLocaleString()}🪙 + ${st.cost!.parts}⚙️`
+        : `${st.cost!.gold.toLocaleString()}🪙`;
+    const canAfford = !maxed &&
+      s.resources.gold >= st.cost!.gold && s.resources.parts >= st.cost!.parts;
+
+    const div = document.createElement('div');
+    div.className = 'tech-node';
+    div.classList.add(maxed ? 'researched' : canAfford ? 'available' : 'locked');
+    div.innerHTML =
+      `<span class="name">${cfg.name} <span class="rank-pips">${pips}</span>` +
+      `<span style="display:block;font-size:10px;color:var(--text-3);font-weight:600;">${cfg.effectDesc}</span></span>` +
+      (maxed
+        ? `<span class="cost">✅ 满级</span>`
+        : canAfford
+          ? `<span class="cost"><button class="research-btn">🛠 改造 ${costText}</button></span>`
+          : `<span class="cost" style="color:var(--red);">❌ ${costText}</span>`);
+
+    if (canAfford) {
+      div.onclick = () => {
+        if (fs.buyRetrofit(cfg.id)) {
+          showToast('🛠 改造完成', `${cfg.name} Lv.${st.level + 1}（${cfg.effectDesc}）`);
+          addLog(`🛠 ${cfg.name} 改造至 Lv.${st.level + 1}（-${costText}）`);
+        }
+        requestRender();
+      };
+    }
+    container.appendChild(div);
+  }
 }
 
 // ==================== 科技树（从 TechConfig 读取，不再硬编码） ====================
@@ -312,9 +366,60 @@ export function renderTech(): void {
     }
 
     container.appendChild(div);
+
+    // ---------- 子科技（v1.3）：主线每级下挂 2 项 × 3 阶，共享研究槽 ----------
+    for (const sub of getSubTechsOfLevel(i)) {
+      const st = sys.getSubTechState(sub.id);
+      const isResearchingThis = researching?.kind === 'sub' && researching.subId === sub.id;
+      const pips = '●'.repeat(st.rank) + '○'.repeat(3 - st.rank);
+      const subCostText = st.partsCost > 0
+        ? `${st.goldCost.toLocaleString()}🪙 + ${st.partsCost}⚙️ · ${st.researchTime}s`
+        : `${st.goldCost.toLocaleString()}🪙 · ${st.researchTime}s`;
+
+      const subDiv = document.createElement('div');
+      subDiv.className = 'tech-node sub';
+      const maxed = st.rank >= 3;
+      subDiv.classList.add(
+        maxed ? 'researched'
+          : isResearchingThis || (st.unlocked && st.canAfford) ? 'available'
+            : 'locked'
+      );
+
+      let subRight = '';
+      if (maxed) {
+        subRight = '✅ 满阶';
+      } else if (isResearchingThis) {
+        subRight = `<span style="font-size:11px;color:var(--teal);font-weight:800;">⏳ 研究中 ${researchRemain}s</span>`;
+      } else if (!st.unlocked) {
+        subRight = `<span style="font-size:11px;color:var(--text-3);">🔒 需研究「${cfg.name}」</span>`;
+      } else if (researching) {
+        subRight = `<span style="font-size:11px;color:var(--text-3);">⏳ 等待当前研究完成</span>`;
+      } else if (st.canAfford) {
+        subRight = `<button class="research-btn">🔬 研究 ${st.researchTime}s</button>`;
+      } else {
+        subRight = `<span style="font-size:11px;color:var(--red);">❌ ${subCostText}</span>`;
+      }
+
+      subDiv.innerHTML =
+        `<span class="name" style="font-size:11px;">├ ${sub.name} <span class="rank-pips">${pips}</span>` +
+        `<span style="display:block;font-size:10px;color:var(--text-3);font-weight:600;">${sub.effectDesc}</span></span>` +
+        `<span class="cost">${subRight}</span>`;
+
+      if (!maxed && !researching && st.unlocked && st.canAfford) {
+        subDiv.onclick = () => {
+          if (sys.researchSubTech(sub.id)) {
+            showToast('🔬 开始研究', `${sub.name} ${st.rank + 1} 阶 — 预计 ${st.researchTime} 秒完成`);
+            addLog(`🔬 子科技「${sub.name}」${st.rank + 1} 阶开始研究（${st.researchTime}s）`);
+          }
+          requestRender();
+        };
+      }
+
+      container.appendChild(subDiv);
+    }
   }
 
-  // ---------- 辅助科技（支线，与主线共享研究槽，永久被动） ----------
+  // ---------- 辅助科技（支线，与主线共享研究槽，v1.3：3 阶制，永久被动） ----------
   const sideContainer = document.getElementById('side-tech-tree');
   if (sideContainer) {
     sideContainer.innerHTML = '';
@@ -322,15 +427,17 @@ export function renderTech(): void {
       const st = sys.getSideTechState(cfg.id);
       const isResearchingThis = researching?.kind === 'side' && researching.sideId === cfg.id;
       const researchTime = GAME_CONSTANTS.RESEARCH_TIME_SIDE;
-      const costText = `${cfg.goldCost.toLocaleString()}🪙 + ${cfg.partsCost}⚙️ · ${researchTime}s`;
+      const maxed = st.rank >= st.maxRank;
+      const pips = '●'.repeat(st.rank) + '○'.repeat(st.maxRank - st.rank);
+      const costText = `${st.goldCost.toLocaleString()}🪙 + ${st.partsCost}⚙️ · ${researchTime}s`;
 
       const div = document.createElement('div');
       div.className = 'tech-node';
-      div.classList.add(st.researched ? 'researched' : isResearchingThis || (st.levelMet && st.canAfford) ? 'available' : 'locked');
+      div.classList.add(maxed ? 'researched' : isResearchingThis || (st.levelMet && st.canAfford) ? 'available' : 'locked');
 
       let right = '';
-      if (st.researched) {
-        right = '✅ 已完成';
+      if (maxed) {
+        right = '✅ 满阶';
       } else if (isResearchingThis) {
         right = `<span style="font-size:11px;color:var(--teal);font-weight:800;">⏳ 研究中 ${researchRemain}s</span>`;
       } else if (!st.levelMet) {
@@ -338,18 +445,18 @@ export function renderTech(): void {
       } else if (researching) {
         right = `<span style="font-size:11px;color:var(--text-3);">⏳ 等待当前研究完成</span>`;
       } else if (st.canAfford) {
-        right = `<button class="research-btn">🧪 研究 ${researchTime}s</button>`;
+        right = `<button class="research-btn">🧪 研究 ${st.rank + 1} 阶 ${researchTime}s</button>`;
       } else {
         right = `<span style="font-size:11px;color:var(--red);">❌ ${costText}</span>`;
       }
 
-      div.innerHTML = `<span class="name">${cfg.name}<span style="display:block;font-size:10px;color:var(--text-3);font-weight:600;">${cfg.description}</span></span><span class="cost">${right}</span>`;
+      div.innerHTML = `<span class="name">${cfg.name} <span class="rank-pips">${pips}</span><span style="display:block;font-size:10px;color:var(--text-3);font-weight:600;">${cfg.description}</span></span><span class="cost">${right}</span>`;
 
-      if (!st.researched && !researching && st.levelMet && st.canAfford) {
+      if (!maxed && !researching && st.levelMet && st.canAfford) {
         div.onclick = () => {
           if (sys.researchSideTech(cfg.id)) {
-            showToast('🧪 开始研究', `${cfg.name} — 预计 ${researchTime} 秒完成`);
-            addLog(`🧪 辅助科技「${cfg.name}」开始研究（${researchTime}s）`);
+            showToast('🧪 开始研究', `${cfg.name} ${st.rank + 1} 阶 — 预计 ${researchTime} 秒完成`);
+            addLog(`🧪 辅助科技「${cfg.name}」${st.rank + 1} 阶开始研究（${researchTime}s）`);
           }
           requestRender();
         };

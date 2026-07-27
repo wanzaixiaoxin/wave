@@ -5,17 +5,24 @@
 import { EventBus } from '../core/EventBus';
 import { GameEvent, GameState, TechLevel } from '../core/types';
 import { getTechConfig, getSideTechConfig, TECH_CONFIGS } from '../config/TechConfig';
+import { getSubTechConfig } from '../config/UpgradeConfig';
 import { GAME_CONSTANTS } from '../config/GameConstants';
 
-/** 辅助科技是否已研究（纯函数，供各消费点读取） */
+/** 辅助科技是否已研究（至少 1 阶；纯函数，供各消费点读取） */
 export function hasSideTech(state: GameState, id: string): boolean {
-  return (state.techTree.sideTechs[id] ?? 0) > 0;
+  return getSideTechRank(state, id) > 0;
 }
 
-/** 造车零件实际消耗（精益制造 ×0.75，向下取整） */
+/** 辅助科技当前阶数（v1.3：0-3 阶制） */
+export function getSideTechRank(state: GameState, id: string): number {
+  return state.techTree.sideTechs[id] ?? 0;
+}
+
+/** 造车零件实际消耗（精益制造每阶 -9%，向下取整） */
 export function getEffectivePartsCost(state: GameState, base: number): number {
-  return hasSideTech(state, 'lean_mfg')
-    ? Math.floor(base * GAME_CONSTANTS.SIDE_LEAN_PARTS_MULT)
+  const rank = getSideTechRank(state, 'lean_mfg');
+  return rank > 0
+    ? Math.floor(base * (1 - GAME_CONSTANTS.SIDE_LEAN_PARTS_PER_RANK * rank))
     : base;
 }
 
@@ -80,7 +87,11 @@ export class TechSystem {
       this.applyTechEffect(job.level);
       EventBus.emit(GameEvent.TECH_RESEARCHED, job.level, config);
     } else if (job.kind === 'side' && job.sideId) {
-      this.state.techTree.sideTechs[job.sideId] = 1;
+      // 支线 3 阶制（v1.3）：到点 +1 阶
+      this.state.techTree.sideTechs[job.sideId] = getSideTechRank(this.state, job.sideId) + 1;
+    } else if (job.kind === 'sub' && job.subId) {
+      // 子科技（v1.3）：到点 +1 阶
+      this.state.techTree.subTechs[job.subId] = (this.state.techTree.subTechs[job.subId] ?? 0) + 1;
     }
   }
 
@@ -132,10 +143,10 @@ export class TechSystem {
     }
   }
 
-  // ==================== 辅助科技（支线） ====================
+  // ==================== 辅助科技（支线，v1.3：3 阶制） ====================
 
   /**
-   * 开始研究辅助科技。要求：研究槽空闲 + 主线等级达标 + 未研究过 + 资源足够。
+   * 开始研究辅助科技下一阶。要求：研究槽空闲 + 主线等级达标 + 未满阶 + 资源足够。
    * 资源在开始时扣除（防刷），到点后由 tick 生效
    */
   researchSideTech(id: string): boolean {
@@ -143,13 +154,17 @@ export class TechSystem {
 
     const config = getSideTechConfig(id);
     if (!config) return false;
-    if (hasSideTech(this.state, id)) return false;
+    const rank = getSideTechRank(this.state, id);
+    if (rank >= config.maxRank) return false; // 已满阶
     if (this.state.techTree.currentLevel < config.requiredLevel) return false;
-    if (this.state.resources.gold < config.goldCost) return false;
-    if (this.state.resources.parts < config.partsCost) return false;
 
-    this.state.resources.gold -= config.goldCost;
-    this.state.resources.parts -= config.partsCost;
+    const goldCost = config.goldCosts[rank];
+    const partsCost = config.partsCosts[rank];
+    if (this.state.resources.gold < goldCost) return false;
+    if (this.state.resources.parts < partsCost) return false;
+
+    this.state.resources.gold -= goldCost;
+    this.state.resources.parts -= partsCost;
 
     const totalTime = GAME_CONSTANTS.RESEARCH_TIME_SIDE;
     this.state.techTree.researching = {
@@ -164,16 +179,88 @@ export class TechSystem {
   }
 
   /** 辅助科技研究状态查询（UI 用） */
-  getSideTechState(id: string): { researched: boolean; levelMet: boolean; canAfford: boolean } {
+  getSideTechState(id: string): {
+    rank: number; maxRank: number; levelMet: boolean; canAfford: boolean;
+    goldCost: number; partsCost: number;
+  } {
     const config = getSideTechConfig(id);
-    if (!config) return { researched: false, levelMet: false, canAfford: false };
+    if (!config) return { rank: 0, maxRank: 0, levelMet: false, canAfford: false, goldCost: 0, partsCost: 0 };
+    const rank = getSideTechRank(this.state, id);
+    const maxed = rank >= config.maxRank;
+    const goldCost = maxed ? 0 : config.goldCosts[rank];
+    const partsCost = maxed ? 0 : config.partsCosts[rank];
     return {
-      researched: hasSideTech(this.state, id),
+      rank,
+      maxRank: config.maxRank,
       levelMet: this.state.techTree.currentLevel >= config.requiredLevel,
       canAfford:
-        this.state.resources.gold >= config.goldCost &&
-        this.state.resources.parts >= config.partsCost &&
+        !maxed &&
+        this.state.resources.gold >= goldCost &&
+        this.state.resources.parts >= partsCost &&
         !this.state.techTree.researching,
+      goldCost,
+      partsCost,
+    };
+  }
+
+  // ==================== 子科技（v1.3：主线每级挂 2 项 × 3 阶，共享研究槽） ====================
+
+  /**
+   * 开始研究子科技下一阶。要求：研究槽空闲 + 所属主线等级已研究 + 未满 3 阶 + 资源足够。
+   * 资源在开始时扣除（防刷），到点后由 tick 生效
+   */
+  researchSubTech(id: string): boolean {
+    if (this.state.techTree.researching) return false; // 研究槽被占用
+
+    const config = getSubTechConfig(id);
+    if (!config) return false;
+    if (this.state.techTree.currentLevel < config.mainLevel) return false; // 前置主线等级
+
+    const rank = this.state.techTree.subTechs[id] ?? 0;
+    if (rank >= 3) return false; // 已满阶
+
+    const goldCost = config.goldCosts[rank];
+    const partsCost = config.partsCosts[rank];
+    if (this.state.resources.gold < goldCost) return false;
+    if (this.state.resources.parts < partsCost) return false;
+
+    this.state.resources.gold -= goldCost;
+    this.state.resources.parts -= partsCost;
+
+    const totalTime = config.researchTimes[rank];
+    this.state.techTree.researching = {
+      kind: 'sub',
+      subId: id,
+      totalTime,
+      finishAt: Date.now() + totalTime * 1000,
+    };
+
+    if (this.debugInstantResearch) this.settleResearch();
+    return true;
+  }
+
+  /** 子科技研究状态查询（UI 用） */
+  getSubTechState(id: string): {
+    rank: number; unlocked: boolean; canAfford: boolean;
+    goldCost: number; partsCost: number; researchTime: number;
+  } {
+    const config = getSubTechConfig(id);
+    if (!config) return { rank: 0, unlocked: false, canAfford: false, goldCost: 0, partsCost: 0, researchTime: 0 };
+    const rank = this.state.techTree.subTechs[id] ?? 0;
+    const maxed = rank >= 3;
+    const goldCost = maxed ? 0 : config.goldCosts[rank];
+    const partsCost = maxed ? 0 : config.partsCosts[rank];
+    return {
+      rank,
+      unlocked: this.state.techTree.currentLevel >= config.mainLevel,
+      canAfford:
+        !maxed &&
+        this.state.resources.gold >= goldCost &&
+        this.state.resources.parts >= partsCost &&
+        !this.state.techTree.researching,
+      goldCost,
+      partsCost,
+      researchTime: maxed ? 0 : config.researchTimes[rank],
     };
   }
 

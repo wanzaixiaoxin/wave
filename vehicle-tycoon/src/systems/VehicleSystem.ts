@@ -14,7 +14,9 @@ import {
   GAME_CONSTANTS, expForLevel, cumulativeExpForLevel,
   statUpgradeCost, buildEnergyCost
 } from '../config/GameConstants';
-import { hasSideTech, getEffectivePartsCost } from './TechSystem';
+import { getSideTechRank, getEffectivePartsCost } from './TechSystem';
+import { getUpgradeMult } from './UpgradeSystem';
+import { getBuildQueueMax } from './FactorySystem';
 
 export class VehicleSystem {
   private state: GameState;
@@ -54,23 +56,27 @@ export class VehicleSystem {
       return null;
     }
 
-    if (this.state.garage.buildQueue.length >= 1 + GAME_CONSTANTS.BUILD_QUEUE_MAX) return null;
+    if (this.state.garage.buildQueue.length >= 1 + getBuildQueueMax(this.state)) return null;
 
     // 市场准入（M9）：时代差异化解锁矩阵（科技/工厂/电站/声望/产量，逐车型声明）
     if (getUnmetRequirements(this.state, tier).length > 0) return null;
 
-    if (this.state.resources.gold < config.buildCost) return null;
+    // 造车金币：批量采购子科技 / 精益生产改造（v1.3 统一乘区）
+    const buildCost = Math.floor(config.buildCost * getUpgradeMult(this.state, 'build_cost'));
+    if (this.state.resources.gold < buildCost) return null;
     const partsCost = getEffectivePartsCost(this.state, config.partsCost);
     if (this.state.resources.parts < partsCost) return null;
     // 造车耗电（M8）：5 × tier²，入队时扣除，不足禁止入队
     const energyCost = buildEnergyCost(tier);
     if (this.state.resources.energy < energyCost) return null;
 
-    this.state.resources.gold -= config.buildCost;
+    this.state.resources.gold -= buildCost;
     this.state.resources.parts -= partsCost;
     this.state.resources.energy -= energyCost;
 
-    const job: BuildJob = { tier, totalTime: config.buildTime, finishAt: 0 };
+    // 建造耗时：改良工具 / 流水线优化子科技 / 装配工艺改造（v1.3 统一乘区）
+    const totalTime = Math.max(1, Math.round(config.buildTime * getUpgradeMult(this.state, 'build_time')));
+    const job: BuildJob = { tier, totalTime, finishAt: 0 };
     this.state.garage.buildQueue.push(job);
     // 空队列直接上建造槽，开始倒计时
     if (this.state.garage.buildQueue.length === 1) {
@@ -119,8 +125,11 @@ export class VehicleSystem {
     this.state.garage.vehicles.push(vehicle);
     this.state.stats.totalVehiclesProduced++;
     // 首台下线的品牌效应（M8）：某 tier 首次造出 +20×tier 声望（producedCount 防重复）
+    // 手工艺传承子科技（v1.3）：首台下线声望 +20%/阶
     if (this.state.techTree.producedCount[tier - 1] === 0) {
-      this.state.resources.reputation += GAME_CONSTANTS.REP_FIRST_BUILD_PER_TIER * tier;
+      this.state.resources.reputation += Math.floor(
+        GAME_CONSTANTS.REP_FIRST_BUILD_PER_TIER * tier * getUpgradeMult(this.state, 'first_produce_rep')
+      );
     }
     this.state.techTree.producedCount[tier - 1]++;
 
@@ -341,16 +350,15 @@ export class VehicleSystem {
     const config = getVehicleConfig(vehicle.tier);
     const partsReturned = Math.floor((config?.partsCost ?? 0) * 0.6);
     this.state.resources.parts += partsReturned;
-    // 回收工艺：拆解金币返还 30% → 50%
-    const scrapGoldRatio = hasSideTech(this.state, 'recycling')
-      ? GAME_CONSTANTS.SIDE_RECYCLING_SCRAP_GOLD
-      : 0.3;
+    // 回收工艺：拆解金币返还 30% + 7%×阶数（v1.3 支线 3 阶制）
+    const scrapGoldRatio = 0.3 +
+      GAME_CONSTANTS.SIDE_RECYCLING_SCRAP_PER_RANK * getSideTechRank(this.state, 'recycling');
     this.state.resources.gold += Math.floor((config?.buildCost ?? 0) * scrapGoldRatio);
 
-    // 传承：累计经验按比例沉淀进传承池，下一辆新车继承（技术档案 +15%）
+    // 传承：累计经验按比例沉淀进传承池，下一辆新车继承（技术档案每阶 +6 个百分点）
     const lifetimeExp = cumulativeExpForLevel(vehicle.level) + vehicle.exp;
     const inheritRatio = GAME_CONSTANTS.INHERIT_EXP_RATIO
-      + (hasSideTech(this.state, 'archive') ? GAME_CONSTANTS.SIDE_ARCHIVE_INHERIT_BONUS : 0);
+      + GAME_CONSTANTS.SIDE_ARCHIVE_INHERIT_PER_RANK * getSideTechRank(this.state, 'archive');
     const inheritedExp = Math.floor(lifetimeExp * inheritRatio);
     this.state.garage.inheritanceExp += inheritedExp;
 

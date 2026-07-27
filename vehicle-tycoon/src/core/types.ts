@@ -223,11 +223,12 @@ export interface BuildJob {
   finishAt: number;    // 完成时间戳（毫秒）；0 = 排队中未上槽
 }
 
-/** 进行中的研究（M7）：主线/支线共享一个研究槽 */
+/** 进行中的研究（M7）：主线/支线/子科技共享一个研究槽 */
 export interface ActiveResearch {
-  kind: 'main' | 'side';
+  kind: 'main' | 'side' | 'sub';
   level?: number;      // kind = 'main' 时的目标等级
   sideId?: string;     // kind = 'side' 时的支线 id
+  subId?: string;      // kind = 'sub' 时的子科技 id
   totalTime: number;   // 总耗时（秒）
   finishAt: number;    // 完成时间戳（毫秒）
 }
@@ -245,6 +246,7 @@ export interface Factory {
   overclockUntil: number;           // 超负荷运转截止时间戳（0=未激活）
   overclockCooldownUntil: number;   // 超负荷冷却结束时间戳
   powerLevel: number;               // 电站等级（M8）：企业的动力源，1-10 级
+  retrofits: Record<string, number>; // 改造线等级（v1.3）：改造线 id → 0-5 级，即时购买生效
 }
 
 export interface Garage {
@@ -259,9 +261,11 @@ export interface TechTree {
   isResearched: boolean[];
   // 解锁条件计数
   producedCount: number[];
-  // 辅助科技：id → 已研究级数（0/1）
+  // 辅助科技（支线）：id → 已研究阶数（0-3，v1.3 起 3 阶制）
   sideTechs: Record<string, number>;
-  // 进行中的研究（M7）：主线/支线共享一个研究槽，null = 空闲
+  // 子科技（v1.3）：id → 已研究阶数（0-3），挂在主线等级下
+  subTechs: Record<string, number>;
+  // 进行中的研究（M7）：主线/支线/子科技共享一个研究槽，null = 空闲
   researching: ActiveResearch | null;
 }
 
@@ -404,15 +408,59 @@ export interface TechConfigEntry {
   effect: string;
 }
 
-/** 辅助科技（支线）：主线等级达标后可独立研究，提供永久被动加成 */
+/** 辅助科技（支线，v1.3 起 3 阶制）：主线等级达标后可逐阶研究，效果逐阶线性叠加 */
 export interface SideTechConfigEntry {
   id: string;
   name: string;
   description: string;
   requiredLevel: number;   // 需要主线科技等级
-  goldCost: number;
-  partsCost: number;
+  maxRank: number;         // 3 阶
+  effectKey: string;       // 效果标识：'order_interval' | 'parts_cost' | 'inherit_ratio' | 'scrap_gold'
+  valuePerRank: number;    // 每阶效果量（线性叠加，符号自带方向）
+  goldCosts: number[];     // 各阶金币费用（逐阶递增）
+  partsCosts: number[];    // 各阶零件费用（逐阶递增）
   effect: string;
+}
+
+/** 统一倍率入口的效果标识（v1.3）：子科技与工厂/电站改造共用同一乘区查询 */
+export type UpgradeEffectKey =
+  | 'build_time'         // 建造耗时
+  | 'build_cost'         // 造车金币
+  | 'order_energy'       // 每单耗电
+  | 'rep_gain'           // 声望获取
+  | 'order_duration'     // 订单耗时
+  | 'wear'               // 磨损累积
+  | 'parts_rate'         // 零件产出速率
+  | 'power_rate'         // 电站产出速率
+  | 'power_cap'          // 能源储存上限
+  | 'first_produce_rep'; // 首台下线声望
+
+/** 子科技（v1.3）：挂在主线等级下，3 阶，走研究槽，效果逐阶线性叠加 */
+export interface SubTechConfigEntry {
+  id: string;
+  mainLevel: number;       // 所属主线等级（该级研究完成后解锁）
+  name: string;
+  effectKey: UpgradeEffectKey;
+  valuePerRank: number;    // 每阶效果（乘区线性叠加：mult = 1 + valuePerRank × rank）
+  goldCosts: number[];     // 3 阶金币费用
+  partsCosts: number[];    // 3 阶零件费用
+  researchTimes: number[]; // 3 阶研究耗时（秒）
+  effectDesc: string;      // 显示用，如「建造耗时 -6%/阶」
+}
+
+/** 工厂/电站改造线（v1.3）：即时购买生效，不占研究槽 */
+export interface RetrofitConfigEntry {
+  id: string;
+  kind: 'factory' | 'power';
+  name: string;
+  effectKey: UpgradeEffectKey;
+  valuePerLevel: number;   // 每级效果（乘区线性叠加）
+  maxLevel: number;        // 5 级
+  goldBase: number;        // 1 级金币费用
+  goldGrowth: number;      // 每级费用倍率
+  partsBase?: number;      // 1 级零件费用（缺省 = 不花零件）
+  partsGrowth?: number;
+  effectDesc: string;      // 显示用，如「零件速率 +15%/级」
 }
 
 export interface TraitConfigEntry {

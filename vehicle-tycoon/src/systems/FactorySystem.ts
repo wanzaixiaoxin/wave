@@ -1,7 +1,20 @@
 import { EventBus } from '../core/EventBus';
 import { GameEvent, GameState } from '../core/types';
 import { GAME_CONSTANTS } from '../config/GameConstants';
+import { getRetrofitConfig, getRetrofitCost } from '../config/UpgradeConfig';
 import { getEventMultiplier } from './EventSystem';
+import { getUpgradeMult } from './UpgradeSystem';
+
+/**
+ * 建造排队位上限（v1.3：工厂 L5 里程碑 +1，3→4）
+ * 唯一实现，VehicleSystem / UI / main 共用
+ */
+export function getBuildQueueMax(state: GameState): number {
+  return GAME_CONSTANTS.BUILD_QUEUE_MAX +
+    (state.factory.level >= GAME_CONSTANTS.FACTORY_QUEUE_BONUS_LEVEL
+      ? GAME_CONSTANTS.FACTORY_QUEUE_BONUS
+      : 0);
+}
 
 export class FactorySystem {
   private state: GameState;
@@ -81,24 +94,61 @@ export class FactorySystem {
     const overclockBoost = Date.now() < this.state.factory.overclockUntil
       ? GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT
       : 1.0;
-    return lineCount * baseRate * levelMult * techBoost * tierScaling * eventBoost * overclockBoost;
+    // 产线自动化改造（v1.3）：零件速率 +15%/级
+    const retrofitBoost = getUpgradeMult(this.state, 'parts_rate');
+    return lineCount * baseRate * levelMult * techBoost * tierScaling * eventBoost * overclockBoost * retrofitBoost;
+  }
+
+  // ==================== 改造线（v1.3：即时购买生效，不占研究槽） ====================
+
+  /**
+   * 购买工厂/电站改造线下一级：资源够即扣即生效（工厂线花金币+零件，电站线只花金币）
+   */
+  buyRetrofit(id: string): boolean {
+    const cfg = getRetrofitConfig(id);
+    if (!cfg) return false;
+    const level = this.state.factory.retrofits[id] ?? 0;
+    const cost = getRetrofitCost(cfg, level);
+    if (!cost) return false; // 已满级
+    if (this.state.resources.gold < cost.gold) return false;
+    if (this.state.resources.parts < cost.parts) return false;
+
+    this.state.resources.gold -= cost.gold;
+    this.state.resources.parts -= cost.parts;
+    this.state.factory.retrofits[id] = level + 1;
+    EventBus.emit(GameEvent.FACTORY_UPGRADED, this.state.factory.level);
+    return true;
+  }
+
+  /** 改造线状态查询（UI 用）：当前等级与下一级费用（满级 cost 为 null） */
+  getRetrofitState(id: string): { level: number; maxLevel: number; cost: { gold: number; parts: number } | null } {
+    const cfg = getRetrofitConfig(id);
+    const level = this.state.factory.retrofits[id] ?? 0;
+    return {
+      level,
+      maxLevel: cfg?.maxLevel ?? 0,
+      cost: cfg ? getRetrofitCost(cfg, level) : null,
+    };
   }
 
   // ==================== 电站（M8） ====================
 
-  /** 电站产出速率 ⚡/秒：1.0 × (1 + 0.6×(等级-1))，科技 L3+ 同样加速 +25% */
+  /** 电站产出速率 ⚡/秒：1.0 × (1 + 0.6×(等级-1))，科技 L3+ 同样加速 +25%，能效优化改造 +12%/级 */
   getEnergyPerSecond(): number {
     const level = this.state.factory.powerLevel;
     const levelMult = 1 + (level - 1) * GAME_CONSTANTS.POWER_RATE_GROWTH;
     const techBoost = this.state.techTree.currentLevel >= 3
       ? 1 + GAME_CONSTANTS.TECH_SPEED_BOOST
       : 1.0;
-    return GAME_CONSTANTS.POWER_BASE_RATE * levelMult * techBoost;
+    return GAME_CONSTANTS.POWER_BASE_RATE * levelMult * techBoost * getUpgradeMult(this.state, 'power_rate');
   }
 
-  /** 能源储存上限 = 100 × 电站等级 */
+  /** 能源储存上限 = 100 × 电站等级 × 储能扩容改造（+25%/级） */
   getEnergyCapacity(): number {
-    return GAME_CONSTANTS.POWER_CAPACITY_PER_LEVEL * this.state.factory.powerLevel;
+    return Math.floor(
+      GAME_CONSTANTS.POWER_CAPACITY_PER_LEVEL * this.state.factory.powerLevel *
+      getUpgradeMult(this.state, 'power_cap')
+    );
   }
 
   /** 升级电站：只花金币 */
