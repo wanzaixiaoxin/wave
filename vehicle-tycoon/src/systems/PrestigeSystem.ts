@@ -129,7 +129,7 @@ export class PrestigeSystem {
 
     // 重置游戏状态（保留声望数据）
     this.state.phase = 'playing';
-    this.state.resources = { gold: 500 + bonuses.startingGold, parts: 0 };
+    this.state.resources = { gold: 500 + bonuses.startingGold, parts: 0, energy: GAME_CONSTANTS.INITIAL_ENERGY, reputation: 0 };
     this.state.garage.vehicles = [];
     this.state.garage.maxCapacity = 6 + (bonuses.garageBonus ?? 0);
     this.state.garage.inheritanceExp = 0;
@@ -140,6 +140,7 @@ export class PrestigeSystem {
     ];
     this.state.factory.overclockUntil = 0;
     this.state.factory.overclockCooldownUntil = 0;
+    this.state.factory.powerLevel = 1; // M8：轮回后电站回到 1 级
     for (let i = 0; i < (bonuses.extraLines ?? 0); i++) {
       this.state.factory.productionLines.push({
         index: this.state.factory.productionLines.length,

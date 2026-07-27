@@ -145,6 +145,35 @@ export const GAME_CONSTANTS = {
   PRESTIGE_GOLD_THRESHOLD: 10000000,
   PRESTIGE_POINTS_PER_MILLION: 1,
   PRESTIGE_MAX_COUNT: 10,
+
+  // ===== 能源（M8）：企业的动力源 =====
+  POWER_MAX_LEVEL: 10,
+  POWER_BASE_RATE: 4.0,           // 电站基础产出 ⚡/秒
+  POWER_RATE_GROWTH: 0.75,        // 每级产出 +75%
+  POWER_CAPACITY_PER_LEVEL: 100,  // 储存上限 = 100 × 等级（到顶停产）
+  POWER_UPGRADE_COSTS: [0, 100, 1000, 4000, 15000, 50000, 120000, 300000, 700000, 1600000], // 升级只花金币
+  INITIAL_ENERGY: 50,             // 新开局赠送能源（教程首车不被卡）
+
+  ENERGY_BUILD_PER_TIER_SQ: 5,    // 造车耗电 = 5 × tier²（T1=5 → T10=500），入队时扣
+  ENERGY_QUALITY_BLUE: 20,        // 品质升级耗电：白→蓝
+  ENERGY_QUALITY_GOLD: 80,        // 品质升级耗电：蓝→金
+  ENERGY_EVOLVE: 200,             // 进化耗电
+  ENERGY_OVERCLOCK: 50,           // 超负荷运转耗电
+  ENERGY_ORDER_SPEED_FACTOR: 0.1, // 每单耗电 = 订单tier × (1 + 速度属性 × 0.1)，派单时预扣
+  ENERGY_SHORTAGE_DURATION_MULT: 1.5, // 动力不足惩罚：本次订单耗时 ×1.5（不锁单）
+
+  // ===== 声望（M8）：企业品牌，一单一单跑出来的口碑 =====
+  REP_ORDER_MULT_NORMAL: 1,       // 完成订单声望 = 订单tier × 类型系数
+  REP_ORDER_MULT_LONG: 2,
+  REP_ORDER_MULT_VALUABLE: 4,
+  REP_EVOLVE: 100,                // 车辆进化 +100
+  REP_FIRST_BUILD_PER_TIER: 20,   // 首台下线品牌效应：+20 × tier（每 tier 只发一次）
+  REP_TIER_GATE: [0, 0, 0, 0, 100, 250, 500, 1000, 2000, 5000, 6000], // 造车声望门槛（下标=tier，T1-3 免；T10 经 sim 校准 10000→6000，见 v1.2 方案 M8 章）
+  REP_VALUABLE_COST: 10,          // 接贵重单动用客户关系：-10 声望
+  MARKETING_GOLD_COST: 1000,      // 营销推广：1000🪙 买 2 分钟声望获取 ×2
+  MARKETING_DURATION: 120,        // 营销 buff 持续（秒）
+  MARKETING_COOLDOWN: 300,        // 营销冷却（秒）
+  MARKETING_REP_MULT: 2.0,        // 营销期间声望获取倍率
 };
 
 /**
@@ -183,4 +212,21 @@ export function garageExpandCost(expandCount: number): number {
     GAME_CONSTANTS.GARAGE_EXPAND_COST_BASE *
     Math.pow(GAME_CONSTANTS.GARAGE_EXPAND_COST_GROWTH, expandCount)
   );
+}
+
+// ==================== M8 能源 / 声望 helper ====================
+
+/** 造车耗电：5 × tier²（入队时扣除） */
+export function buildEnergyCost(tier: number): number {
+  return GAME_CONSTANTS.ENERGY_BUILD_PER_TIER_SQ * tier * tier;
+}
+
+/** 每单耗电：订单 tier × (1 + 车辆速度属性 × 0.1)（派单时预扣） */
+export function orderEnergyCost(orderTier: number, speedStat: number): number {
+  return orderTier * (1 + speedStat * GAME_CONSTANTS.ENERGY_ORDER_SPEED_FACTOR);
+}
+
+/** 造某 tier 车型所需的品牌声望门槛（T1-3 免） */
+export function tierReputationGate(tier: number): number {
+  return GAME_CONSTANTS.REP_TIER_GATE[tier] ?? 0;
 }

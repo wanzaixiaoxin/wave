@@ -5,7 +5,7 @@
 import { getState, getSystems, requestRender } from './context';
 import { getUnlockedConfigs, getVehicleConfig } from '../config/VehicleConfig';
 import { TECH_CONFIGS, SIDE_TECH_CONFIGS } from '../config/TechConfig';
-import { GAME_CONSTANTS } from '../config/GameConstants';
+import { GAME_CONSTANTS, buildEnergyCost, tierReputationGate } from '../config/GameConstants';
 import { showToast } from './toast';
 import { addLog } from './log';
 
@@ -15,6 +15,30 @@ export function renderTopBar(): void {
   const s = getState();
   document.getElementById('gold')!.textContent = s.resources.gold.toLocaleString();
   document.getElementById('parts')!.textContent = Math.floor(s.resources.parts).toLocaleString();
+
+  // 能源（M8）：当前/上限，显示取整
+  const fs = getSystems().factorySys;
+  document.getElementById('energy')!.textContent =
+    `${Math.floor(s.resources.energy)}/${fs.getEnergyCapacity()}`;
+  // 声望（M8）：企业品牌
+  document.getElementById('reputation')!.textContent =
+    Math.floor(s.resources.reputation).toLocaleString();
+
+  // 营销推广按钮（M8）：buff 中 / 冷却中 / 可购买
+  const mBtn = document.getElementById('btn-marketing') as HTMLButtonElement | null;
+  if (mBtn) {
+    const m = getSystems().orderSys.getMarketingState();
+    if (m.buff > 0) {
+      mBtn.textContent = `📣 营销中 ${Math.ceil(m.buff)}s`;
+      mBtn.disabled = true;
+    } else if (m.cooldown > 0) {
+      mBtn.textContent = `📣 冷却 ${Math.ceil(m.cooldown)}s`;
+      mBtn.disabled = true;
+    } else {
+      mBtn.textContent = `📣 营销推广 (${GAME_CONSTANTS.MARKETING_GOLD_COST.toLocaleString()}🪙)`;
+      mBtn.disabled = s.resources.gold < GAME_CONSTANTS.MARKETING_GOLD_COST;
+    }
+  }
   document.getElementById('intimacy-sum')!.textContent =
     s.garage.vehicles.reduce((sum, v) => sum + v.intimacy, 0).toString();
 
@@ -56,8 +80,15 @@ export function buildTierOptions(): void {
   unlocked.forEach(cfg => {
     const opt = document.createElement('option');
     opt.value = cfg.tier.toString();
-    const partsStr = cfg.partsCost > 0 ? ` + ${cfg.partsCost}⚙️` : '';
-    opt.textContent = `${cfg.emoji} ${cfg.name} (${cfg.buildCost.toLocaleString()}🪙${partsStr})`;
+    // 市场准入（M8）：声望未达标的车型在下拉里置灰展示门槛
+    const gate = tierReputationGate(cfg.tier);
+    if (s.resources.reputation < gate) {
+      opt.disabled = true;
+      opt.textContent = `${cfg.emoji} ${cfg.name} 🔒 品牌声望不足（需 ${gate.toLocaleString()}📈）`;
+    } else {
+      const partsStr = cfg.partsCost > 0 ? ` + ${cfg.partsCost}⚙️` : '';
+      opt.textContent = `${cfg.emoji} ${cfg.name} (${cfg.buildCost.toLocaleString()}🪙${partsStr} + ${buildEnergyCost(cfg.tier)}⚡)`;
+    }
     select.appendChild(opt);
   });
 
@@ -74,16 +105,27 @@ export function renderWorkbench(): void {
   const box = document.getElementById('build-status');
   const btn = document.getElementById('btn-build') as HTMLButtonElement | null;
 
-  // 建造槽/队列满，或车位（含预留）满 → 禁用制造按钮
+  // 建造槽/队列满，或车位（含预留）满 → 禁用制造按钮；
+  // 选中车型声望/能源不足（M8）→ 同样置灰并给出原因
   const queueFull = queue.length >= 1 + GAME_CONSTANTS.BUILD_QUEUE_MAX;
   const reservedFull = s.garage.vehicles.length + queue.length >= s.garage.maxCapacity;
+  const selectedTier = parseInt(
+    (document.getElementById('build-tier-select') as HTMLSelectElement | null)?.value ?? '0'
+  );
+  const repGate = tierReputationGate(selectedTier);
+  const repShort = selectedTier > 0 && s.resources.reputation < repGate;
+  const energyShort = selectedTier > 0 && s.resources.energy < buildEnergyCost(selectedTier);
   if (btn) {
-    btn.disabled = queueFull || reservedFull;
+    btn.disabled = queueFull || reservedFull || repShort || energyShort;
     btn.title = queueFull
       ? '建造队列已满，等造完再来'
       : reservedFull
         ? '车库已满（含建造中的车），请扩建或拆解'
-        : '';
+        : repShort
+          ? `品牌声望不足（需 ${repGate.toLocaleString()}📈），多跑订单攒口碑`
+          : energyShort
+            ? `能源不足：造车需要 ${buildEnergyCost(selectedTier)}⚡，升级电站或等充电`
+            : '';
   }
 
   if (!box) return;
@@ -153,7 +195,7 @@ export function renderFactory(): void {
     }
   }
 
-  // 超负荷按钮状态（激活倒计时 / 冷却倒计时 / 可用）
+  // 超负荷按钮状态（激活倒计时 / 冷却倒计时 / 可用）；M8：激活需 50⚡
   const ocBtn = document.getElementById('btn-overclock') as HTMLButtonElement | null;
   if (ocBtn) {
     const oc = fs.getOverclockState();
@@ -164,8 +206,40 @@ export function renderFactory(): void {
       ocBtn.textContent = `⏳ 冷却 ${Math.ceil(oc.cooldown)}s`;
       ocBtn.disabled = true;
     } else {
-      ocBtn.textContent = `⚡ 超负荷 ×${GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT} (${GAME_CONSTANTS.FACTORY_OVERCLOCK_DURATION}s)`;
-      ocBtn.disabled = false;
+      ocBtn.textContent = `⚡ 超负荷 ×${GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT} (${GAME_CONSTANTS.FACTORY_OVERCLOCK_DURATION}s · ${GAME_CONSTANTS.ENERGY_OVERCLOCK}⚡)`;
+      ocBtn.disabled = s.resources.energy < GAME_CONSTANTS.ENERGY_OVERCLOCK;
+      ocBtn.title = ocBtn.disabled ? `能源不足：超负荷需要 ${GAME_CONSTANTS.ENERGY_OVERCLOCK}⚡` : '';
+    }
+  }
+
+  // ---------- 电站（M8）：时代名称随科技等级演进 ----------
+  const POWER_ERA_NAMES = ['', '燃煤锅炉', '燃油电站', '并网电站', '清洁能源', '聚变堆'];
+  const eraName = POWER_ERA_NAMES[Math.min(s.techTree.currentLevel, 5)] ?? POWER_ERA_NAMES[1];
+  document.getElementById('power-name')!.textContent = eraName;
+  document.getElementById('power-level')!.textContent = s.factory.powerLevel.toString();
+  document.getElementById('power-rate')!.textContent = fs.getEnergyPerSecond().toFixed(2);
+
+  const cap = fs.getEnergyCapacity();
+  document.getElementById('power-stock')!.textContent = `${Math.floor(s.resources.energy)} / ${cap}`;
+  (document.getElementById('power-bar') as HTMLElement).style.width =
+    `${Math.min(100, (s.resources.energy / cap) * 100)}%`;
+
+  const pCost = fs.getPowerUpgradeCost();
+  document.getElementById('power-upgrade-cost')!.textContent = pCost > 0 ? pCost.toLocaleString() : 'MAX';
+  const pBtn = document.getElementById('btn-upgrade-power') as HTMLButtonElement | null;
+  if (pBtn) {
+    pBtn.disabled = pCost < 0 || s.resources.gold < pCost;
+    pBtn.title = pCost > 0 && s.resources.gold < pCost ? '金币不足' : '';
+  }
+  const pNextEl = document.getElementById('power-next-info');
+  if (pNextEl) {
+    if (pCost > 0) {
+      const nextMult = 1 + s.factory.powerLevel * GAME_CONSTANTS.POWER_RATE_GROWTH;
+      const techBoost = s.techTree.currentLevel >= 3 ? 1 + GAME_CONSTANTS.TECH_SPEED_BOOST : 1.0;
+      const nextRate = GAME_CONSTANTS.POWER_BASE_RATE * nextMult * techBoost;
+      pNextEl.textContent = `下一级：${nextRate.toFixed(2)}⚡/秒 · 储备上限 ${GAME_CONSTANTS.POWER_CAPACITY_PER_LEVEL * (s.factory.powerLevel + 1)}`;
+    } else {
+      pNextEl.textContent = '⚡ 电站已满级';
     }
   }
 }

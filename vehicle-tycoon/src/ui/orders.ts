@@ -3,6 +3,7 @@
 // ============================================================
 
 import { getState, getSystems, requestRender } from './context';
+import { GAME_CONSTANTS } from '../config/GameConstants';
 import { showToast } from './toast';
 import { addLog } from './log';
 
@@ -67,6 +68,9 @@ export function renderOrders(): void {
     let vehicleInfo = '';
     if (idle.length > 0) {
       vehicleInfo = `🚗 ${idle.length} 辆可派`;
+    } else if (o.type === 'valuable' && getState().resources.reputation < GAME_CONSTANTS.REP_VALUABLE_COST) {
+      // 贵重单动用客户关系（M8）：声望不足不能派
+      vehicleInfo = `📈 声望不足（贵重单需 ${GAME_CONSTANTS.REP_VALUABLE_COST}📈）`;
     } else if (allVehicles.some(v => v.status === 'idle' && v.tier < o.tier)) {
       // 有空闲车但车型等级不够
       vehicleInfo = `🔒 需要 T${o.tier} 及以上车型`;
@@ -74,10 +78,16 @@ export function renderOrders(): void {
       vehicleInfo = '🔴 暂无空闲车辆';
     }
 
+    // 贵重单声望成本（M8）
+    const repCostLine = o.type === 'valuable'
+      ? `<div style="font-size:10px;color:var(--teal);font-weight:700;">📈 动用客户关系 -${GAME_CONSTANTS.REP_VALUABLE_COST}声望</div>`
+      : '';
+
     div.innerHTML = `
       <div class="type">${TYPE_NAMES[o.type] || o.type} <span style="font-size:10px;color:var(--text-3);">T${o.tier}</span></div>
       <div class="reward">+${o.baseReward}🪙</div>
       <div style="font-size:11px;color:var(--text-3);">经验 ${o.expReward}</div>
+      ${repCostLine}
       <div class="vehicle-hint">${vehicleInfo}</div>
     `;
 
@@ -114,6 +124,11 @@ export function renderOrders(): void {
         orderSys.assignVehicle(o.id, target.id);
         showToast(`🚚 ${target.name} 接了订单`, `${TYPE_NAMES[o.type] || ''} · ${o.duration}秒后完成`);
         addLog(`🚚 ${target.name} 接了${TYPE_NAMES[o.type] || ''}订单`);
+        // 动力不足（M8）：能源没跟上，本次订单耗时 ×1.5
+        if (o.lowPower) {
+          addLog(`⚡ 动力不足！能源储备见底，本单耗时 ×${GAME_CONSTANTS.ENERGY_SHORTAGE_DURATION_MULT}，快升级电站`);
+          showToast('⚡ 动力不足', '能源不足，本单耗时 +50%');
+        }
       } else {
         addLog('⚠️ 没有空闲车辆可接单');
         showToast('⚠️ 派车失败', '没有空闲车辆');

@@ -115,6 +115,7 @@ export enum GameEvent {
 
   // 工厂事件
   FACTORY_UPGRADED = 'factory:upgraded',
+  POWER_UPGRADED = 'power:upgraded',
   PRODUCTION_STARTED = 'production:started',
   PRODUCTION_COMPLETED = 'production:completed',
 
@@ -198,6 +199,7 @@ export interface Order {
   status: OrderStatus;
   createdAt: number;
   expiresAt: number;
+  lowPower?: boolean;              // 动力不足（M8）：派单时能源不够，本次耗时 ×1.5
   // 路上事件（M1）：派单时按概率排定，到点弹出 2-3 选 1 决策
   enRouteEvent?: {
     eventId: string;
@@ -242,6 +244,7 @@ export interface Factory {
   productionLines: ProductionLine[];
   overclockUntil: number;           // 超负荷运转截止时间戳（0=未激活）
   overclockCooldownUntil: number;   // 超负荷冷却结束时间戳
+  powerLevel: number;               // 电站等级（M8）：企业的动力源，1-10 级
 }
 
 export interface Garage {
@@ -265,6 +268,8 @@ export interface TechTree {
 export interface Resources {
   gold: number;
   parts: number;
+  energy: number;       // ⚡ 能源（M8）：企业动力源，电站产出，造车/升品/进化/派单消耗
+  reputation: number;   // 📈 声望（M8）：企业品牌口碑，高 tier 车型市场准入门槛
 }
 
 export interface ActiveEvent {

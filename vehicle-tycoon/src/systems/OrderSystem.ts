@@ -11,7 +11,7 @@ import {
 import { getVehicleConfig } from '../config/VehicleConfig';
 import { getTraitConfig } from '../config/TraitConfig';
 import { getEnRouteEventConfig, rollEnRouteEvent } from '../config/EnRouteEventConfig';
-import { GAME_CONSTANTS } from '../config/GameConstants';
+import { GAME_CONSTANTS, orderEnergyCost } from '../config/GameConstants';
 import { EconomySystem, getGlobalIncomeMult } from './EconomySystem';
 import { getEventMultiplier } from './EventSystem';
 import { hasSideTech } from './TechSystem';
@@ -218,9 +218,24 @@ export class OrderSystem {
       return false;
     }
 
+    // 贵重单动用客户关系（M8）：派单时 -10 声望，不足不能派
+    if (order.type === OrderType.Valuable) {
+      if (this.state.resources.reputation < GAME_CONSTANTS.REP_VALUABLE_COST) return false;
+      this.state.resources.reputation -= GAME_CONSTANTS.REP_VALUABLE_COST;
+    }
+
     order.assignedVehicleId = vehicleId;
     order.status = OrderStatus.InProgress;
     vehicle.status = VehicleStatus.OnOrder;
+
+    // 每单耗电（M8）：订单tier × (1 + 速度 × 0.1)，派单时预扣；
+    // 能源不足不锁单，扣到 0 为止，本次订单耗时 ×1.5（动力不足惩罚）
+    const energyNeed = orderEnergyCost(order.tier, vehicle.stats.speed);
+    const energyPaid = Math.min(this.state.resources.energy, energyNeed);
+    this.state.resources.energy -= energyPaid;
+    if (energyPaid < energyNeed) {
+      order.lowPower = true;
+    }
 
     // 订单耗时加成：速度属性每级 -4%、勤快特质 ×0.85、T1 天赋 ×0.8、
     // 专精（快车 ×0.75 / 重载 ×1.15）、高磨损 ×1.2
@@ -242,6 +257,10 @@ export class OrderSystem {
     }
     if (vehicle.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD) {
       duration *= GAME_CONSTANTS.WEAR_DURATION_MULT;
+    }
+    // 动力不足惩罚（M8）：派单时能源不够，本次耗时 ×1.5
+    if (order.lowPower) {
+      duration *= GAME_CONSTANTS.ENERGY_SHORTAGE_DURATION_MULT;
     }
     const departAt = Date.now();
     vehicle.statusEndAt = departAt + duration * 1000;
@@ -411,6 +430,16 @@ export class OrderSystem {
       this.state.stats.totalGoldEarned += totalReward;
       this.state.stats.totalOrdersCompleted++;
 
+      // 品牌声望（M8）：订单tier × 类型系数（普通1/长途2/贵重4），营销推广期间 ×2
+      const repMultMap: Record<OrderType, number> = {
+        [OrderType.Normal]: GAME_CONSTANTS.REP_ORDER_MULT_NORMAL,
+        [OrderType.LongDistance]: GAME_CONSTANTS.REP_ORDER_MULT_LONG,
+        [OrderType.Valuable]: GAME_CONSTANTS.REP_ORDER_MULT_VALUABLE,
+      };
+      this.state.resources.reputation += Math.floor(
+        order.tier * repMultMap[order.type] * getEventMultiplier(this.state, 'reputation_mult')
+      );
+
       // 经验由 VehicleSystem 监听 ORDER_COMPLETED 后统一走 addExp() 处理
       // （含特质/品质加成与升级判定），此处不再直接累加
       vehicle.ordersCompleted++;
@@ -509,7 +538,48 @@ export class OrderSystem {
     if (vehicle.tier < order.tier) return false;
     if (order.requiredDurability && vehicle.stats.durability < order.requiredDurability) return false;
     if (order.requiredQuality && qualityRank(vehicle.quality) < qualityRank(order.requiredQuality)) return false;
+    // 贵重单动用客户关系（M8）：声望不足不能派（autoAssign 同样跳过）
+    if (order.type === OrderType.Valuable && this.state.resources.reputation < GAME_CONSTANTS.REP_VALUABLE_COST) return false;
     return true;
+  }
+
+  // ==================== 营销推广（M8） ====================
+
+  /**
+   * 营销推广：1000🪙 买 2 分钟声望获取 ×2，冷却 5 分钟
+   * buff 与冷却都复用 ActiveEvent 机制（effectType='reputation_mult' / 'marketing_cooldown'）
+   */
+  runMarketing(): boolean {
+    if (this.state.resources.gold < GAME_CONSTANTS.MARKETING_GOLD_COST) return false;
+    if (getEventMultiplier(this.state, 'reputation_mult') !== 1.0) return false; // buff 进行中
+    if (this.state.activeEvents.some(e => e.effectType === 'marketing_cooldown')) return false;
+
+    this.state.resources.gold -= GAME_CONSTANTS.MARKETING_GOLD_COST;
+    this.state.activeEvents.push({
+      id: 'marketing',
+      effectType: 'reputation_mult',
+      value: GAME_CONSTANTS.MARKETING_REP_MULT,
+      remainingTime: GAME_CONSTANTS.MARKETING_DURATION,
+      totalDuration: GAME_CONSTANTS.MARKETING_DURATION,
+    });
+    this.state.activeEvents.push({
+      id: 'marketing_cd',
+      effectType: 'marketing_cooldown',
+      value: 1,
+      remainingTime: GAME_CONSTANTS.MARKETING_COOLDOWN,
+      totalDuration: GAME_CONSTANTS.MARKETING_COOLDOWN,
+    });
+    return true;
+  }
+
+  /** 营销状态查询（UI 用）：buff 剩余秒数 / 冷却剩余秒数 */
+  getMarketingState(): { buff: number; cooldown: number } {
+    const buff = this.state.activeEvents.find(e => e.effectType === 'reputation_mult');
+    const cd = this.state.activeEvents.find(e => e.effectType === 'marketing_cooldown');
+    return {
+      buff: buff?.remainingTime ?? 0,
+      cooldown: cd?.remainingTime ?? 0,
+    };
   }
 
   private hasVehicleWithDurability(minDurability: number): boolean {

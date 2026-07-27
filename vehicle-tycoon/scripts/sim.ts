@@ -19,6 +19,7 @@ import { EventBus } from '../src/core/EventBus';
 import { GameEvent, Order, Vehicle } from '../src/core/types';
 import { getUnlockedConfigs } from '../src/config/VehicleConfig';
 import { getEnRouteEventConfig } from '../src/config/EnRouteEventConfig';
+import { buildEnergyCost, tierReputationGate } from '../src/config/GameConstants';
 
 const state = SaveManager.createInitialState();
 const vehicleSys = new VehicleSystem(state);
@@ -54,8 +55,18 @@ function mark(key: string): void {
 
 const SIM_HOURS = 3;
 
+// M8 收支统计：按每秒正负 delta 归因（正=产出/获取，负=消耗）
+let energyProduced = 0, energyConsumed = 0, repGained = 0, repSpent = 0;
+let lowPowerOrders = 0, energyZeroSeconds = 0;
+EventBus.on(GameEvent.ORDER_COMPLETED, (...args: unknown[]) => {
+  if ((args[0] as Order).lowPower) lowPowerOrders++;
+});
+
 for (let t = 0; t < SIM_HOURS * 3600; t++) {
   simTime += 1000;
+
+  const energyBefore = state.resources.energy;
+  const repBefore = state.resources.reputation;
 
   factorySys.tick(1);
   orderSys.tick(1);
@@ -69,10 +80,19 @@ for (let t = 0; t < SIM_HOURS * 3600; t++) {
   // 2. 研究科技（有钱有条件就研究）
   techSys.researchNext();
 
-  // 3. 升级工厂（金币富余时）
+  // 3. 升级工厂与电站（M8：按需升电站——储备偏低或金币富余时优先补动力）
   if (state.resources.gold > economySys.getNetWorth() * 0.5) {
     factorySys.upgradeFactory();
   }
+  const powerCost = factorySys.getPowerUpgradeCost();
+  if (powerCost > 0 && state.resources.gold > powerCost * 2
+    && (state.resources.energy < factorySys.getEnergyCapacity() * 0.3
+      || state.resources.gold > economySys.getNetWorth() * 0.5)) {
+    factorySys.upgradePower();
+  }
+
+  // 3b. 营销推广（M8：冷却一好就用；留 3 倍金币缓冲，不挤占研究/造车经费）
+  if (state.resources.gold > 3000) orderSys.runMarketing();
 
   // 4. 保养磨损车
   for (const v of state.garage.vehicles) {
@@ -81,11 +101,14 @@ for (let t = 0; t < SIM_HOURS * 3600; t++) {
 
   // 5. 造车：新 tier 必买（升级时刻）；资金充裕时补充/更新车队（含解锁条件的产量打磨）
   // M7：建造入队后占「未来车位」，车队规模按 现有 + 建造中/排队 计算
+  // M8：叠加声望门槛（市场准入）与能源预算
   const unlocked = getUnlockedConfigs(state.techTree.currentLevel, state.techTree.producedCount);
   const topTier = state.garage.vehicles.length > 0
     ? Math.max(...state.garage.vehicles.map(v => v.tier)) : 0;
   const reservedSize = state.garage.vehicles.length + state.garage.buildQueue.length;
   const candidates = unlocked.filter(c => {
+    if (state.resources.reputation < tierReputationGate(c.tier)) return false; // M8 声望门槛
+    if (state.resources.energy < buildEnergyCost(c.tier)) return false;        // M8 能源预算
     if (state.resources.parts < c.partsCost) return false;
     if (c.tier > topTier) return state.resources.gold >= c.buildCost * 1.2; // 新 tier：升级时刻
     return state.resources.gold >= c.buildCost * 3;                         // 同级：只花闲钱
@@ -131,9 +154,17 @@ for (let t = 0; t < SIM_HOURS * 3600; t++) {
     const fleet = state.garage.vehicles.map(v => 'T' + v.tier).join(',');
     console.log(
       `[${min}min] 🪙${Math.floor(state.resources.gold).toLocaleString()} ⚙️${Math.floor(state.resources.parts).toLocaleString()} ` +
-      `科技L${state.techTree.currentLevel} 订单${state.stats.totalOrdersCompleted} 车队[${fleet}]`
+      `⚡${Math.floor(state.resources.energy)} 📈${Math.floor(state.resources.reputation).toLocaleString()} ` +
+      `科技L${state.techTree.currentLevel} 电站L${state.factory.powerLevel} 订单${state.stats.totalOrdersCompleted} 车队[${fleet}]`
     );
   }
+
+  // M8 收支归因：本秒能源/声望的正负 delta
+  const eDelta = state.resources.energy - energyBefore;
+  if (eDelta > 0) energyProduced += eDelta; else energyConsumed -= eDelta;
+  const rDelta = state.resources.reputation - repBefore;
+  if (rDelta > 0) repGained += rDelta; else repSpent -= rDelta;
+  if (state.resources.energy < 1) energyZeroSeconds++;
 }
 
 console.log('======== 进度模拟结果（贪心玩家） ========');
@@ -144,5 +175,10 @@ for (const m of marks) {
 console.log('------------------------------------------');
 console.log(`结束时金币: ${Math.floor(state.resources.gold).toLocaleString()}`);
 console.log(`结束时零件: ${Math.floor(state.resources.parts).toLocaleString()}`);
+console.log(`结束时能源: ${Math.floor(state.resources.energy)} / ${factorySys.getEnergyCapacity()}（电站 L${state.factory.powerLevel}）`);
+console.log(`结束时声望: ${Math.floor(state.resources.reputation).toLocaleString()}`);
+console.log(`能源收支（M8）: 产出 ${Math.floor(energyProduced).toLocaleString()}⚡ / 消耗 ${Math.floor(energyConsumed).toLocaleString()}⚡`);
+console.log(`声望收支（M8）: 获取 ${Math.floor(repGained).toLocaleString()}📈 / 消耗 ${Math.floor(repSpent).toLocaleString()}📈（贵重单动用客户关系）`);
+console.log(`动力不足订单: ${lowPowerOrders}（占 ${(lowPowerOrders / Math.max(1, state.stats.totalOrdersCompleted) * 100).toFixed(1)}%）· 能源归零 ${energyZeroSeconds}s`);
 console.log(`总订单数: ${state.stats.totalOrdersCompleted}`);
 console.log(`车库: ${state.garage.vehicles.map(v => 'T' + v.tier).join(', ')}`);

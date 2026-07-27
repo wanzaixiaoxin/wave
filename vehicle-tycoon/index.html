@@ -91,6 +91,8 @@
     .resource .icon { font-size: 14px; }
     .resource .value { color: var(--gold-strong); min-width: 44px; font-variant-numeric: tabular-nums; }
     .resource .value.parts { color: var(--blue); }
+    .resource .value.energy { color: var(--orange); min-width: 52px; }
+    .resource .value.rep { color: var(--teal); }
 
     #eps { font-size: 11px; color: var(--text-3); font-weight: 600; font-variant-numeric: tabular-nums; }
     #tier-label {
@@ -616,6 +618,8 @@
     <div id="topbar">
       <span class="resource"><span class="icon">🪙</span><span class="value" id="gold">0</span></span>
       <span class="resource"><span class="icon">⚙️</span><span class="value parts" id="parts">0</span></span>
+      <span class="resource" title="能源：电站产出，造车/升品/进化/派单都要用电"><span class="icon">⚡</span><span class="value energy" id="energy">0/0</span></span>
+      <span class="resource" title="声望：企业品牌口碑，高阶车型的市场准入"><span class="icon">📈</span><span class="value rep" id="reputation">0</span></span>
       <span class="resource"><span class="icon">💖</span><span id="intimacy-sum">0</span></span>
       <span id="eps">0/s</span>
       <span id="tier-label">🛴 T1</span>
@@ -652,7 +656,8 @@
     <!-- 订单 -->
     <div class="section-title" style="margin-top:-4px;">
       📋 运输订单
-      <span style="float:right;font-weight:400;font-size:10px;color:var(--text-3);">派车出去赚钱 ↑</span>
+      <button id="btn-marketing" class="btn btn-gold" style="float:right;padding:2px 10px;font-size:10px;border-radius:999px;">📣 营销推广</button>
+      <span style="float:right;font-weight:400;font-size:10px;color:var(--text-3);margin-right:8px;line-height:22px;">派车出去赚钱 ↑</span>
     </div>
     <div id="orders"></div>
 
@@ -685,6 +690,26 @@
       <div id="factory-next-info" style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px;"></div>
       <p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px;">
         💡 工厂持续产出零件 → 零件用于工作台造车 → 造的车跑订单赚钱 → 钱投入工厂升级（扩大产线 + 加速）
+      </p>
+
+      <!-- 电站（M8）：企业的动力源，时代名称随科技等级演进 -->
+      <div class="section-title" style="margin-top:14px;">⚡ <span id="power-name">燃煤锅炉</span> Lv.<span id="power-level">1</span></div>
+      <div style="padding:8px 0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg-0);border:1.5px solid var(--line-soft);border-radius:8px;margin-bottom:6px;">
+          <span>⚡ 产出速率</span>
+          <span style="color:var(--orange);font-weight:800;font-size:18px;font-variant-numeric:tabular-nums;"><span id="power-rate">1.00</span>/秒</span>
+        </div>
+        <div style="height:10px;border-radius:999px;overflow:hidden;background:var(--bg-3);border:1.5px solid var(--line);margin-bottom:4px;">
+          <div id="power-bar" style="height:100%;background:var(--orange);width:0%;transition:width 0.3s linear;"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);font-weight:700;margin-bottom:6px;">
+          <span>能源储备</span><span id="power-stock">0 / 100</span>
+        </div>
+      </div>
+      <button class="btn btn-gold" id="btn-upgrade-power" style="width:100%;font-size:12px;padding:8px 12px;">⬆ 升级电站 (<span id="power-upgrade-cost">300</span>🪙)</button>
+      <div id="power-next-info" style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px;"></div>
+      <p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px;">
+        💡 造车、升品质、进化、派单都要用电。动力跟不上时，订单会陷入「动力不足」——耗时 +50%，别让车队断电。
       </p>
     </div>
 

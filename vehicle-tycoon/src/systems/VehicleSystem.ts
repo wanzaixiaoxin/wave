@@ -12,7 +12,7 @@ import { getVehicleConfig } from '../config/VehicleConfig';
 import { rollTrait, getTraitConfig } from '../config/TraitConfig';
 import {
   GAME_CONSTANTS, expForLevel, cumulativeExpForLevel,
-  statUpgradeCost
+  statUpgradeCost, buildEnergyCost, tierReputationGate
 } from '../config/GameConstants';
 import { hasSideTech, getEffectivePartsCost } from './TechSystem';
 
@@ -56,12 +56,19 @@ export class VehicleSystem {
 
     if (this.state.garage.buildQueue.length >= 1 + GAME_CONSTANTS.BUILD_QUEUE_MAX) return null;
 
+    // 市场准入（M8）：高 tier 车型需要品牌声望门槛
+    if (this.state.resources.reputation < tierReputationGate(tier)) return null;
+
     if (this.state.resources.gold < config.buildCost) return null;
     const partsCost = getEffectivePartsCost(this.state, config.partsCost);
     if (this.state.resources.parts < partsCost) return null;
+    // 造车耗电（M8）：5 × tier²，入队时扣除，不足禁止入队
+    const energyCost = buildEnergyCost(tier);
+    if (this.state.resources.energy < energyCost) return null;
 
     this.state.resources.gold -= config.buildCost;
     this.state.resources.parts -= partsCost;
+    this.state.resources.energy -= energyCost;
 
     const job: BuildJob = { tier, totalTime: config.buildTime, finishAt: 0 };
     this.state.garage.buildQueue.push(job);
@@ -111,6 +118,10 @@ export class VehicleSystem {
 
     this.state.garage.vehicles.push(vehicle);
     this.state.stats.totalVehiclesProduced++;
+    // 首台下线的品牌效应（M8）：某 tier 首次造出 +20×tier 声望（producedCount 防重复）
+    if (this.state.techTree.producedCount[tier - 1] === 0) {
+      this.state.resources.reputation += GAME_CONSTANTS.REP_FIRST_BUILD_PER_TIER * tier;
+    }
     this.state.techTree.producedCount[tier - 1]++;
 
     // 传承池：拆解旧车沉淀的经验，新车落地一次性继承（原始经验，不吃特质/品质加成）
@@ -215,14 +226,18 @@ export class VehicleSystem {
       if (vehicle.ordersCompleted < GAME_CONSTANTS.QUALITY_BLUE_REQUIRED_ORDERS) return false;
       if (this.state.resources.gold < GAME_CONSTANTS.QUALITY_BLUE_COST_GOLD) return false;
       if (this.state.resources.parts < GAME_CONSTANTS.QUALITY_BLUE_COST_PARTS) return false;
+      if (this.state.resources.energy < GAME_CONSTANTS.ENERGY_QUALITY_BLUE) return false; // M8 耗电
       this.state.resources.gold -= GAME_CONSTANTS.QUALITY_BLUE_COST_GOLD;
       this.state.resources.parts -= GAME_CONSTANTS.QUALITY_BLUE_COST_PARTS;
+      this.state.resources.energy -= GAME_CONSTANTS.ENERGY_QUALITY_BLUE;
     } else if (nextQuality === Quality.Gold) {
       if (vehicle.level < GAME_CONSTANTS.QUALITY_GOLD_REQUIRED_LEVEL) return false;
       if (this.state.resources.gold < GAME_CONSTANTS.QUALITY_GOLD_COST_GOLD) return false;
       if (this.state.resources.parts < GAME_CONSTANTS.QUALITY_GOLD_COST_PARTS) return false;
+      if (this.state.resources.energy < GAME_CONSTANTS.ENERGY_QUALITY_GOLD) return false; // M8 耗电
       this.state.resources.gold -= GAME_CONSTANTS.QUALITY_GOLD_COST_GOLD;
       this.state.resources.parts -= GAME_CONSTANTS.QUALITY_GOLD_COST_PARTS;
+      this.state.resources.energy -= GAME_CONSTANTS.ENERGY_QUALITY_GOLD;
     }
 
     const totalTime = nextQuality === Quality.Blue
@@ -290,13 +305,18 @@ export class VehicleSystem {
     if (vehicle.quality !== Quality.Gold) return false;
     if (vehicle.level < GAME_CONSTANTS.MAX_VEHICLE_LEVEL) return false;
     if (vehicle.intimacy < GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT) return false;
+    if (this.state.resources.energy < GAME_CONSTANTS.ENERGY_EVOLVE) return false; // M8 耗电
+
+    this.state.resources.energy -= GAME_CONSTANTS.ENERGY_EVOLVE;
 
     // 进化效果：
     // 1. 等级上限 +5（getMaxLevel 对进化车生效）
     // 2. 收入 ×3（EconomySystem.calculateOrderIncome 按 isEvolved 加成）
     // 3. 车型专属天赋生效（收入/耗时/零件/刷新等，见 EconomySystem / OrderSystem）
+    // 4. 品牌声望 +100（M8）
     vehicle.isEvolved = true;
     this.state.stats.totalEvolutions++;
+    this.state.resources.reputation += GAME_CONSTANTS.REP_EVOLVE;
 
     EventBus.emit(GameEvent.VEHICLE_EVOLVED, vehicle);
     return true;

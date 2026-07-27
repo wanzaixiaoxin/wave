@@ -3,13 +3,13 @@
 // ============================================================
 
 import { EventBus } from './EventBus';
-import { GameEvent, SaveData, OfflineResult, GameState, ChallengeRank, OrderType, Vehicle } from './types';
+import { GameEvent, SaveData, OfflineResult, GameState, ChallengeRank, OrderType } from './types';
 import { GAME_CONSTANTS } from '../config/GameConstants';
 import { getVehicleConfig } from '../config/VehicleConfig';
 import { EconomySystem, getGlobalIncomeMult } from '../systems/EconomySystem';
 
 const SAVE_KEY = 'tycoon_save_v1';
-const SAVE_VERSION = '1.1'; // 1.1：M7 时间化（建造队列 / 研究计时 / 升品计时）
+const SAVE_VERSION = '1.2'; // 1.2：M8 经济维度扩展（能源 ⚡ + 声望 📈）；老档不迁移，版本不匹配直接开新局
 const MAX_OFFLINE_SECONDS = 2 * 3600; // 2 hours
 const OFFLINE_EFFICIENCY = 0.4;
 
@@ -54,52 +54,16 @@ export class SaveManager {
 
       const data = JSON.parse(raw) as SaveData;
 
-      // 版本兼容检查
-      if (!data.version) {
-        console.warn('[SaveManager] Unknown save version, attempting migration');
+      // 版本检查（M8 起老档不迁移）：版本不匹配直接开新局
+      if (data.version !== SAVE_VERSION) {
+        console.warn(`[SaveManager] 存档版本不匹配（存档 ${data.version ?? '未知'} / 当前 ${SAVE_VERSION}），已作废开新局`);
+        return null;
       }
-
-      if (data.factory?.productionLines?.length > 0 && 'currentOrder' in data.factory.productionLines[0]) {
-        data.factory.productionLines = data.factory.productionLines.map((_: unknown, i: number) => ({
-          index: i,
-          isActive: true,
-        }));
-      }
-      return SaveManager.migrate(data);
+      return data;
     } catch (err) {
       console.error('[SaveManager] Load failed:', err);
       return null;
     }
-  }
-
-  /**
-   * 存档迁移：旧档缺失的顶层/嵌套字段用初始值补齐
-   * （防止版本升级后访问新字段崩溃）
-   */
-  private static migrate(data: SaveData): SaveData {
-    const defaults = SaveManager.createInitialState();
-    const merged = { ...defaults, ...data };
-    const nestedKeys = [
-      'resources', 'factory', 'garage', 'techTree',
-      'stats', 'prestige', 'challenge', 'settings',
-    ] as const;
-    for (const key of nestedKeys) {
-      if (data[key] && typeof data[key] === 'object') {
-        (merged as Record<string, unknown>)[key] = { ...defaults[key], ...data[key] };
-      }
-    }
-    // 老档车辆补齐新增字段（磨损/疲劳/专精/升品计时）
-    if (merged.garage?.vehicles) {
-      merged.garage.vehicles = merged.garage.vehicles.map(v => ({
-        specialization: null,
-        wear: 0,
-        consecutiveOrders: 0,
-        lastOrderCompletedAt: 0,
-        qualityUpgrade: null,
-        ...(v as Partial<Vehicle>),
-      } as Vehicle));
-    }
-    return merged;
   }
 
   /**
@@ -146,6 +110,14 @@ export class SaveManager {
   static applyOfflineEarnings(state: GameState, result: OfflineResult): void {
     state.resources.gold += result.goldEarned;
     state.resources.parts += result.partsEarned;
+    // 离线期间电站按真实时间持续产电（M8），到储存上限停产
+    const powerMult = 1 + (state.factory.powerLevel - 1) * GAME_CONSTANTS.POWER_RATE_GROWTH;
+    const techBoost = state.techTree.currentLevel >= 3 ? 1 + GAME_CONSTANTS.TECH_SPEED_BOOST : 1.0;
+    const cap = GAME_CONSTANTS.POWER_CAPACITY_PER_LEVEL * state.factory.powerLevel;
+    state.resources.energy = Math.min(
+      cap,
+      state.resources.energy + GAME_CONSTANTS.POWER_BASE_RATE * powerMult * techBoost * result.offlineSeconds
+    );
     state.stats.totalGoldEarned += result.goldEarned;
     state.stats.offlineTime += result.offlineSeconds;
     EventBus.emit(GameEvent.OFFLINE_EARNINGS, result);
@@ -193,7 +165,7 @@ export class SaveManager {
   static createInitialState(): GameState {
     return {
       phase: 'playing',
-      resources: { gold: 200, parts: 0 },
+      resources: { gold: 200, parts: 0, energy: GAME_CONSTANTS.INITIAL_ENERGY, reputation: 0 },
       garage: {
         maxCapacity: 6,
         vehicles: [],
@@ -207,6 +179,7 @@ export class SaveManager {
         ],
         overclockUntil: 0,
         overclockCooldownUntil: 0,
+        powerLevel: 1,   // 新开局送 1 级电站（M8）
       },
       orders: [],
       techTree: {

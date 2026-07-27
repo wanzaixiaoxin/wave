@@ -3,7 +3,7 @@ import { SaveManager } from '../src/core/SaveManager';
 import { VehicleSystem } from '../src/systems/VehicleSystem';
 import { OrderSystem } from '../src/systems/OrderSystem';
 import { EconomySystem, getGlobalIncomeMult, getTalentIncomeMult } from '../src/systems/EconomySystem';
-import { EventSystem } from '../src/systems/EventSystem';
+import { EventSystem, getEventMultiplier } from '../src/systems/EventSystem';
 import { AchievementSystem } from '../src/systems/AchievementSystem';
 import { Quality, OrderType, TalentType, TraitType, VehicleStatus, OrderStatus, Specialization } from '../src/core/types';
 import { GAME_CONSTANTS, cumulativeExpForLevel } from '../src/config/GameConstants';
@@ -62,6 +62,8 @@ state.activeEvents.length = 0;
 // 5. T5 卡车天赋 ×1.5（普通单）
 state.resources.gold = 10_000_000;
 state.resources.parts = 1_000_000;
+state.resources.energy = 1_000_000;     // M8：批量造车/派单耗电，测试充满
+state.resources.reputation = 100_000;   // M8：绕过 tier 声望门槛（门槛见 28 组专项断言）
 const truck = vehicleSys.createVehicle(5)!;
 truck.trait = null; truck.isEvolved = true;
 const truckIncome = EconomySystem.calculateOrderIncome(truck, 100, 1.0, globalMult, false, state, OrderType.Normal).income;
@@ -221,6 +223,7 @@ const techSys = new TechSystem(state);
 techSys.debugInstantResearch = true; // M7：测试用即时完成
 state.resources.gold = 10_000_000;
 state.resources.parts = 1_000_000;
+state.resources.energy = 1_000_000; // M8：补充测试耗电
 check('主线不足不能研究支线', !techSys.researchSideTech('archive')); // 需要 L3，当前 L1
 state.techTree.currentLevel = 3;
 check('研究精益制造', techSys.researchSideTech('lean_mfg'));
@@ -495,10 +498,207 @@ const fVehicleSys = new VehicleSystem(fs2);
 fVehicleSys.debugInstantBuild = true;
 fs2.resources.gold = 10_000_000;
 fs2.resources.parts = 1_000_000;
+fs2.resources.energy = 1_000_000;    // M8：造 T4 需 80⚡
+fs2.resources.reputation = 100_000;  // M8：绕过 T4 声望门槛
 fVehicleSys.createVehicle(4); // 车库最高 T4 → ×(1 + 4×0.3) = ×2.2
 const ppsT4 = fFactorySys.getPartsPerSecond();
 check('T4 进度系数比值 2.2/1.3', Math.abs(ppsT4 / ppsEmpty - 2.2 / 1.3) < 0.01,
   `ratio=${ppsT4 / ppsEmpty}`);
+
+// 28. M8 经济维度：能源 ⚡ + 声望 📈
+
+// 28a. 电站产出 / 储存上限 / 升级 / 科技加速
+const ps = SaveManager.createInitialState();
+const pFactory = new FactorySystem(ps);
+const baseRate = GAME_CONSTANTS.POWER_BASE_RATE;
+check('新局送 1 级电站与 50⚡', ps.factory.powerLevel === 1 && ps.resources.energy === GAME_CONSTANTS.INITIAL_ENERGY);
+check('电站 L1 产出 = 基础速率/s', Math.abs(pFactory.getEnergyPerSecond() - baseRate) < 1e-9,
+  `rate=${pFactory.getEnergyPerSecond()}`);
+const eB0 = ps.resources.energy;
+pFactory.tick(1);
+check('tick 累积能源 +基础速率/s', Math.abs(ps.resources.energy - (eB0 + baseRate)) < 1e-9, `energy=${ps.resources.energy}`);
+ps.resources.energy = pFactory.getEnergyCapacity() - 0.5;
+pFactory.tick(10);
+check('能源到顶停产', ps.resources.energy === pFactory.getEnergyCapacity(),
+  `energy=${ps.resources.energy} cap=${pFactory.getEnergyCapacity()}`);
+check('储存上限 = 100 × 等级', pFactory.getEnergyCapacity() === 100);
+ps.resources.gold = 10000;
+check('升级电站只扣金币', pFactory.upgradePower() && ps.factory.powerLevel === 2
+  && ps.resources.gold === 10000 - GAME_CONSTANTS.POWER_UPGRADE_COSTS[1]);
+check('电站 L2 上限 200 / 产出 ×(1+成长率)',
+  pFactory.getEnergyCapacity() === 200
+  && Math.abs(pFactory.getEnergyPerSecond() - baseRate * (1 + GAME_CONSTANTS.POWER_RATE_GROWTH)) < 1e-9);
+ps.techTree.currentLevel = 3;
+check('科技 L3 电站同样 +25%',
+  Math.abs(pFactory.getEnergyPerSecond() - baseRate * (1 + GAME_CONSTANTS.POWER_RATE_GROWTH) * 1.25) < 1e-9,
+  `rate=${pFactory.getEnergyPerSecond()}`);
+
+// 28b. 造车能源扣除与不足禁止、首台下线声望
+const bs = SaveManager.createInitialState();
+const bVehicle = new VehicleSystem(bs);
+bVehicle.debugInstantBuild = true;
+bs.resources.gold = 10_000_000;
+bs.resources.parts = 1_000_000;
+const eB1 = bs.resources.energy;
+check('造 T1 成功', bVehicle.createVehicle(1) !== null);
+check('造 T1 扣 5⚡（5×tier²）', eB1 - bs.resources.energy === 5, `delta=${eB1 - bs.resources.energy}`);
+check('首台下线声望 +20×tier', bs.resources.reputation === 20, `rep=${bs.resources.reputation}`);
+bVehicle.createVehicle(1);
+check('同 tier 再造不重复发首台声望', bs.resources.reputation === 20, `rep=${bs.resources.reputation}`);
+bs.resources.energy = 4;
+check('能源不足禁止造车入队', bVehicle.createVehicle(1) === null);
+
+// 28c. tier 声望门槛拦截（单一来源：createVehicle）
+const gs = SaveManager.createInitialState();
+const gVehicle = new VehicleSystem(gs);
+gVehicle.debugInstantBuild = true;
+gs.resources.gold = 10_000_000;
+gs.resources.parts = 1_000_000;
+gs.resources.energy = 1_000_000;
+check('声望 0 造 T4 被门槛拦截', gVehicle.createVehicle(4) === null);
+gs.resources.reputation = GAME_CONSTANTS.REP_TIER_GATE[4];
+check('声望达标可造 T4', gVehicle.createVehicle(4) !== null);
+check('T4 首台声望 +80', bs.resources.reputation === 20
+  && gs.resources.reputation === 100 + 80, `rep=${gs.resources.reputation}`);
+
+// 28d. 每单耗电（tier × (1+速度×0.1)）与动力不足 ×1.5
+const es = SaveManager.createInitialState();
+const eVehicle = new VehicleSystem(es);
+eVehicle.debugInstantBuild = true;
+const eOrder = new OrderSystem(es);
+es.resources.gold = 10_000_000;
+es.resources.parts = 1_000_000;
+es.resources.energy = 1000;
+const ev1 = eVehicle.createVehicle(1)!;
+ev1.trait = null;
+ev1.stats.speed = 5;
+const pushOrder = (id: string, type: OrderType, tier = 1): void => {
+  es.orders.push({
+    id, type, tier, baseReward: 10, expReward: 20, duration: 30,
+    requiredQuality: type === OrderType.Valuable ? Quality.Blue : undefined,
+    assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
+  });
+};
+pushOrder('o_e1', OrderType.Normal);
+const eBefore1 = es.resources.energy;
+const tA = Date.now();
+check('能源充足可派单', eOrder.assignVehicle('o_e1', ev1.id));
+check('每单耗电 1×(1+5×0.1)=1.5', Math.abs(eBefore1 - es.resources.energy - 1.5) < 1e-9,
+  `paid=${eBefore1 - es.resources.energy}`);
+const durFull = ev1.statusEndAt - tA;
+check('能源充足不触发动力不足', !es.orders.find(o => o.id === 'o_e1')?.lowPower);
+eOrder.completeOrder('o_e1');
+
+es.resources.energy = 0;
+pushOrder('o_e2', OrderType.Normal);
+const tB = Date.now();
+check('能源为 0 仍可派单（不锁单）', eOrder.assignVehicle('o_e2', ev1.id));
+const durLow = ev1.statusEndAt - tB;
+check('动力不足标记 lowPower', es.orders.find(o => o.id === 'o_e2')?.lowPower === true);
+check('动力不足耗时 ×1.5', Math.abs(durLow / durFull - 1.5) < 0.02, `full=${durFull}ms low=${durLow}ms`);
+check('能源扣到 0 为止', es.resources.energy === 0);
+eOrder.completeOrder('o_e2'); // 结算让车辆回到空闲，供后续断言使用
+
+// 28e. 声望获取加权（普通1/长途2/贵重4）与贵重单声望消耗
+es.resources.energy = 1000;
+es.resources.reputation = 100;
+pushOrder('o_r1', OrderType.Normal);
+eOrder.assignVehicle('o_r1', ev1.id);
+const repB1 = es.resources.reputation;
+eOrder.completeOrder('o_r1');
+check('普通单声望 +tier×1', es.resources.reputation - repB1 === 1, `delta=${es.resources.reputation - repB1}`);
+
+ev1.stats.durability = 3;
+pushOrder('o_r2', OrderType.LongDistance);
+eOrder.assignVehicle('o_r2', ev1.id);
+const repB2 = es.resources.reputation;
+eOrder.completeOrder('o_r2');
+check('长途单声望 +tier×2', es.resources.reputation - repB2 === 2, `delta=${es.resources.reputation - repB2}`);
+
+ev1.quality = Quality.Blue;
+const repBeforeV = es.resources.reputation;
+pushOrder('o_r3', OrderType.Valuable);
+check('贵重单派单扣 10 声望', eOrder.assignVehicle('o_r3', ev1.id)
+  && es.resources.reputation === repBeforeV - 10, `rep=${es.resources.reputation}`);
+const repB3 = es.resources.reputation;
+eOrder.completeOrder('o_r3');
+check('贵重单完成声望 +tier×4', es.resources.reputation - repB3 === 4, `delta=${es.resources.reputation - repB3}`);
+
+es.resources.reputation = 5;
+pushOrder('o_r4', OrderType.Valuable);
+check('声望不足不能派贵重单', !eOrder.assignVehicle('o_r4', ev1.id));
+check('canVehicleTakeOrder 同步拦截贵重单',
+  !eOrder.canVehicleTakeOrder(ev1.id, es.orders.find(o => o.id === 'o_r4')!));
+
+// 28f. 营销推广：1000🪙 买 ×2 声望 buff，冷却 5 分钟
+es.resources.reputation = 100;
+es.resources.gold = 10000;
+const goldBeforeM = es.resources.gold;
+check('营销推广购买成功', eOrder.runMarketing());
+check('营销扣 1000🪙', goldBeforeM - es.resources.gold === GAME_CONSTANTS.MARKETING_GOLD_COST);
+check('营销 buff 声望 ×2', getEventMultiplier(es, 'reputation_mult') === GAME_CONSTANTS.MARKETING_REP_MULT);
+pushOrder('o_r5', OrderType.Normal);
+eOrder.assignVehicle('o_r5', ev1.id);
+const repB5 = es.resources.reputation;
+eOrder.completeOrder('o_r5');
+check('营销期间声望获取 ×2', es.resources.reputation - repB5 === 2, `delta=${es.resources.reputation - repB5}`);
+check('buff 中不可重复营销', !eOrder.runMarketing());
+es.activeEvents = es.activeEvents.filter(e => e.effectType !== 'reputation_mult'); // 手动结束 buff
+check('冷却中不可营销', !eOrder.runMarketing());
+es.activeEvents.length = 0; // 手动结束冷却
+check('冷却结束可再营销', eOrder.runMarketing());
+es.activeEvents.length = 0;
+
+// 28g. 进化：耗 200⚡，声望 +100
+const evo = eVehicle.createVehicle(1)!;
+evo.trait = null;
+evo.quality = Quality.Gold;
+evo.level = GAME_CONSTANTS.MAX_VEHICLE_LEVEL;
+evo.intimacy = GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT;
+es.resources.energy = GAME_CONSTANTS.ENERGY_EVOLVE - 1;
+check('能源不足进化被拒', !eVehicle.evolve(evo.id));
+es.resources.energy = GAME_CONSTANTS.ENERGY_EVOLVE;
+const repBeforeEvo = es.resources.reputation;
+check('进化成功', eVehicle.evolve(evo.id));
+check('进化耗 200⚡', es.resources.energy === 0);
+check('进化声望 +100', es.resources.reputation - repBeforeEvo === GAME_CONSTANTS.REP_EVOLVE,
+  `delta=${es.resources.reputation - repBeforeEvo}`);
+
+// 28h. 品质升级耗电：白→蓝 20⚡ / 蓝→金 80⚡
+const qs2 = SaveManager.createInitialState();
+const q2Vehicle = new VehicleSystem(qs2);
+q2Vehicle.debugInstantBuild = true;
+qs2.resources.gold = 1_000_000;
+qs2.resources.parts = 100_000;
+const qv = q2Vehicle.createVehicle(1)!;
+qv.trait = null;
+qv.ordersCompleted = GAME_CONSTANTS.QUALITY_BLUE_REQUIRED_ORDERS;
+qs2.resources.energy = GAME_CONSTANTS.ENERGY_QUALITY_BLUE - 1;
+check('能源不足升品（蓝）被拒', !q2Vehicle.upgradeQuality(qv.id));
+qs2.resources.energy = GAME_CONSTANTS.ENERGY_QUALITY_BLUE;
+check('升品（蓝）扣 20⚡', q2Vehicle.upgradeQuality(qv.id) && qs2.resources.energy === 0);
+qv.level = GAME_CONSTANTS.QUALITY_GOLD_REQUIRED_LEVEL;
+qs2.resources.energy = GAME_CONSTANTS.ENERGY_QUALITY_GOLD - 1;
+check('能源不足升品（金）被拒', !q2Vehicle.upgradeQuality(qv.id));
+qs2.resources.energy = GAME_CONSTANTS.ENERGY_QUALITY_GOLD;
+check('升品（金）扣 80⚡', q2Vehicle.upgradeQuality(qv.id) && qs2.resources.energy === 0);
+
+// 28i. 超负荷运转耗 50⚡
+ps.factory.overclockUntil = 0;
+ps.factory.overclockCooldownUntil = 0;
+ps.resources.energy = GAME_CONSTANTS.ENERGY_OVERCLOCK - 1;
+check('能源不足超负荷被拒', !pFactory.activateOverclock());
+ps.resources.energy = GAME_CONSTANTS.ENERGY_OVERCLOCK;
+check('超负荷扣 50⚡', pFactory.activateOverclock() && ps.resources.energy === 0);
+
+// 28j. 离线期间电站按真实时间累积到上限
+const offState = SaveManager.createInitialState();
+offState.resources.energy = 0;
+SaveManager.applyOfflineEarnings(offState, { offlineSeconds: 10, carsProduced: 0, goldEarned: 0, partsEarned: 0 });
+check('离线 10s 电站按速率累积', Math.abs(offState.resources.energy - GAME_CONSTANTS.POWER_BASE_RATE * 10) < 1e-9,
+  `energy=${offState.resources.energy}`);
+SaveManager.applyOfflineEarnings(offState, { offlineSeconds: 7200, carsProduced: 0, goldEarned: 0, partsEarned: 0 });
+check('离线能源充到上限停产', offState.resources.energy === 100, `energy=${offState.resources.energy}`);
 
 console.log(failures === 0 ? '\n全部通过 🎉' : `\n${failures} 项失败`);
 process.exit(failures === 0 ? 0 : 1);

@@ -206,28 +206,31 @@ export function showVehicleDetail(v: Vehicle): void {
     }
   }
 
-  // ---------- 提升品质（M7：耗时化，升级中锁车不显示按钮） ----------
+  // ---------- 提升品质（M7：耗时化，升级中锁车不显示按钮；M8：耗电） ----------
   if (v.quality !== Quality.Gold && !v.qualityUpgrade) {
     const upgradeTime = v.quality === Quality.White
       ? GAME_CONSTANTS.QUALITY_UPGRADE_TIME_BLUE
       : GAME_CONSTANTS.QUALITY_UPGRADE_TIME_GOLD;
-    buttons.push(`⬆ 提升品质 (${upgradeTime}s)`, () => {
+    const energyCost = v.quality === Quality.White
+      ? GAME_CONSTANTS.ENERGY_QUALITY_BLUE
+      : GAME_CONSTANTS.ENERGY_QUALITY_GOLD;
+    buttons.push(`⬆ 提升品质 (${upgradeTime}s · ${energyCost}⚡)`, () => {
       if (sys.vehicleSys.upgradeQuality(v.id)) {
         showToast('⬆ 开始升级', `${v.name} 进场升级品质，${upgradeTime} 秒后完成（期间不可派单）`);
-        addLog(`⬆ ${v.name} 开始升级品质（${upgradeTime}s），期间锁定不可派单`);
+        addLog(`⬆ ${v.name} 开始升级品质（${upgradeTime}s · -${energyCost}⚡），期间锁定不可派单`);
         hideModal();
       } else {
-        addLog('❌ 品质升级条件不足（需要空闲 + 完成订单数/金币/零件）');
+        addLog(`❌ 品质升级条件不足（需要空闲 + 完成订单数/金币/零件/${energyCost}⚡能源）`);
       }
       requestRender();
     });
   }
 
-  // ---------- 进化 ----------
+  // ---------- 进化（M8：耗 200⚡，品牌声望 +100） ----------
   if (!v.isEvolved && v.quality === Quality.Gold && v.level >= GAME_CONSTANTS.MAX_VEHICLE_LEVEL && v.intimacy >= GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT) {
-    buttons.push('🌟 进化', () => {
+    buttons.push(`🌟 进化 (${GAME_CONSTANTS.ENERGY_EVOLVE}⚡)`, () => {
       if (sys.vehicleSys.evolve(v.id)) { hideModal(); }
-      else { addLog('❌ 进化失败'); }
+      else { addLog(`❌ 进化失败（需要 ${GAME_CONSTANTS.ENERGY_EVOLVE}⚡能源）`); }
       requestRender();
     });
   }

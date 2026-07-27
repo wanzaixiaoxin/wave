@@ -11,6 +11,15 @@ export class FactorySystem {
   }
 
   tick(deltaSeconds: number): void {
+    // 电站产电（M8）：不受「全员休息」影响，到储存上限停产
+    const cap = this.getEnergyCapacity();
+    if (this.state.resources.energy < cap) {
+      this.state.resources.energy = Math.min(
+        cap,
+        this.state.resources.energy + this.getEnergyPerSecond() * deltaSeconds
+      );
+    }
+
     // 「全员休息」事件：产线停产
     if (getEventMultiplier(this.state, 'stop_production') !== 1.0) return;
 
@@ -75,12 +84,51 @@ export class FactorySystem {
     return lineCount * baseRate * levelMult * techBoost * tierScaling * eventBoost * overclockBoost;
   }
 
+  // ==================== 电站（M8） ====================
+
+  /** 电站产出速率 ⚡/秒：1.0 × (1 + 0.6×(等级-1))，科技 L3+ 同样加速 +25% */
+  getEnergyPerSecond(): number {
+    const level = this.state.factory.powerLevel;
+    const levelMult = 1 + (level - 1) * GAME_CONSTANTS.POWER_RATE_GROWTH;
+    const techBoost = this.state.techTree.currentLevel >= 3
+      ? 1 + GAME_CONSTANTS.TECH_SPEED_BOOST
+      : 1.0;
+    return GAME_CONSTANTS.POWER_BASE_RATE * levelMult * techBoost;
+  }
+
+  /** 能源储存上限 = 100 × 电站等级 */
+  getEnergyCapacity(): number {
+    return GAME_CONSTANTS.POWER_CAPACITY_PER_LEVEL * this.state.factory.powerLevel;
+  }
+
+  /** 升级电站：只花金币 */
+  upgradePower(): boolean {
+    const level = this.state.factory.powerLevel;
+    if (level >= GAME_CONSTANTS.POWER_MAX_LEVEL) return false;
+
+    const cost = GAME_CONSTANTS.POWER_UPGRADE_COSTS[level];
+    if (this.state.resources.gold < cost) return false;
+
+    this.state.resources.gold -= cost;
+    this.state.factory.powerLevel++;
+    EventBus.emit(GameEvent.POWER_UPGRADED, this.state.factory.powerLevel);
+    return true;
+  }
+
+  getPowerUpgradeCost(): number {
+    const level = this.state.factory.powerLevel;
+    if (level >= GAME_CONSTANTS.POWER_MAX_LEVEL) return -1;
+    return GAME_CONSTANTS.POWER_UPGRADE_COSTS[level];
+  }
+
   // ==================== 超负荷运转 ====================
 
-  /** 激活超负荷：60 秒产出 ×2，之后进入 5 分钟冷却 */
+  /** 激活超负荷：60 秒产出 ×2，之后进入 5 分钟冷却；激活时耗 50⚡（M8） */
   activateOverclock(): boolean {
     const now = Date.now();
     if (now < this.state.factory.overclockCooldownUntil) return false;
+    if (this.state.resources.energy < GAME_CONSTANTS.ENERGY_OVERCLOCK) return false;
+    this.state.resources.energy -= GAME_CONSTANTS.ENERGY_OVERCLOCK;
     this.state.factory.overclockUntil = now + GAME_CONSTANTS.FACTORY_OVERCLOCK_DURATION * 1000;
     this.state.factory.overclockCooldownUntil = now + GAME_CONSTANTS.FACTORY_OVERCLOCK_COOLDOWN * 1000;
     return true;

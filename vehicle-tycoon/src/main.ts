@@ -8,7 +8,7 @@ import { EventBus } from './core/EventBus';
 import { SaveManager } from './core/SaveManager';
 import { GameEvent, GameState, Vehicle, Order, OfflineResult } from './core/types';
 import { getVehicleConfig, getUnlockedConfigs } from './config/VehicleConfig';
-import { GAME_CONSTANTS } from './config/GameConstants';
+import { GAME_CONSTANTS, buildEnergyCost, tierReputationGate } from './config/GameConstants';
 import { getEnRouteEventConfig } from './config/EnRouteEventConfig';
 
 import { setGameLoop, setRenderFn, requestRender, getState, getSystems } from './ui/context';
@@ -103,7 +103,7 @@ function bindEvents(): void {
     GameEvent.VEHICLE_EVOLVED, GameEvent.VEHICLE_RETIRED,
     GameEvent.ORDER_COMPLETED, GameEvent.ACHIEVEMENT_UNLOCKED,
     GameEvent.GARAGE_EXPANDED, GameEvent.FACTORY_UPGRADED,
-    GameEvent.TECH_RESEARCHED, GameEvent.RANDOM_EVENT_TRIGGERED,
+    GameEvent.POWER_UPGRADED, GameEvent.TECH_RESEARCHED, GameEvent.RANDOM_EVENT_TRIGGERED,
     GameEvent.OFFLINE_EARNINGS, GameEvent.QUALITY_UPGRADED,
     GameEvent.EN_ROUTE_EVENT_TRIGGERED, GameEvent.EN_ROUTE_EVENT_RESOLVED,
   ];
@@ -195,6 +195,10 @@ function bindEvents(): void {
         addLog(`🏭 工厂升级！`);
         break;
       }
+      case GameEvent.POWER_UPGRADED: {
+        addLog(`⚡ 电站升级！动力输出提升`);
+        break;
+      }
       case GameEvent.TECH_RESEARCHED: {
         addLog(`🔬 科技研究完成！新车型已解锁`);
         showToast('🔬 科技研究完成', '新车型已解锁，快去造车吧！');
@@ -252,6 +256,17 @@ function bindUI(): void {
       addLog(`❌ 零件不足！需要 ${cfg.partsCost}⚙️`);
       return;
     }
+    // M8：市场准入（声望门槛）与动力（能源）校验，与 createVehicle 保持同一来源
+    const repGate = tierReputationGate(tier);
+    if (s.resources.reputation < repGate) {
+      addLog(`❌ 品牌声望不足！造 ${cfg.name} 需要 ${repGate.toLocaleString()}📈，多跑订单攒口碑`);
+      return;
+    }
+    const energyCost = buildEnergyCost(tier);
+    if (s.resources.energy < energyCost) {
+      addLog(`❌ 能源不足！造车需要 ${energyCost}⚡，升级电站或等充电`);
+      return;
+    }
 
     const result = getSystems().vehicleSys.createVehicle(tier);
     if (result) {
@@ -278,10 +293,42 @@ function bindUI(): void {
   document.getElementById('btn-overclock')!.onclick = () => {
     const fs = getSystems().factorySys;
     if (fs.activateOverclock()) {
-      addLog(`⚡ 工厂超负荷运转！${GAME_CONSTANTS.FACTORY_OVERCLOCK_DURATION} 秒内零件产出 ×${GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT}`);
+      addLog(`⚡ 工厂超负荷运转！${GAME_CONSTANTS.FACTORY_OVERCLOCK_DURATION} 秒内零件产出 ×${GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT}（-${GAME_CONSTANTS.ENERGY_OVERCLOCK}⚡）`);
       showToast('⚡ 超负荷运转', `零件产出 ×${GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT}，持续 ${GAME_CONSTANTS.FACTORY_OVERCLOCK_DURATION} 秒`);
+    } else if (getState().resources.energy < GAME_CONSTANTS.ENERGY_OVERCLOCK) {
+      addLog(`❌ 能源不足！超负荷运转需要 ${GAME_CONSTANTS.ENERGY_OVERCLOCK}⚡`);
     } else {
       addLog('⏳ 超负荷还在冷却中');
+    }
+    requestRender();
+  };
+
+  // 电站升级（M8）
+  document.getElementById('btn-upgrade-power')!.onclick = () => {
+    const fs = getSystems().factorySys;
+    if (fs.upgradePower()) {
+      const lv = getState().factory.powerLevel;
+      addLog(`⚡ 电站升级至 Lv.${lv}，动力输出提升！`);
+      showToast('⚡ 电站升级', `动力输出 ${fs.getEnergyPerSecond().toFixed(2)}⚡/秒`);
+    } else {
+      const cost = fs.getPowerUpgradeCost();
+      if (cost < 0) {
+        addLog('⚡ 电站已达最高等级');
+      } else {
+        addLog(`❌ 金币不足，电站升级需要 ${cost.toLocaleString()}🪙`);
+      }
+    }
+    requestRender();
+  };
+
+  // 营销推广（M8）：花金币买 2 分钟声望获取 ×2
+  document.getElementById('btn-marketing')!.onclick = () => {
+    const os = getSystems().orderSys;
+    if (os.runMarketing()) {
+      addLog(`📣 营销推广启动！${GAME_CONSTANTS.MARKETING_DURATION / 60} 分钟内声望获取 ×${GAME_CONSTANTS.MARKETING_REP_MULT}（-${GAME_CONSTANTS.MARKETING_GOLD_COST.toLocaleString()}🪙）`);
+      showToast('📣 营销推广', '声望获取 ×2，持续 2 分钟');
+    } else {
+      addLog('❌ 营销暂时推不动（金币不足 / 已在推广中 / 冷却未结束）');
     }
     requestRender();
   };
