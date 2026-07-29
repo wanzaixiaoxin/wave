@@ -126,7 +126,7 @@ export class TechSystem {
   private applyTechEffect(level: number): void {
     switch (level) {
       case 1:
-        // 解锁品质系统（品质在 VehicleSystem 中已经可用）
+        // 解锁规格系统（规格在 VehicleSystem 中已经可用）
         break;
       case 2:
         // 解锁 T4-T5（由 VehicleSystem 控制）

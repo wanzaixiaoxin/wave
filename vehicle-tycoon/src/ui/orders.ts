@@ -32,7 +32,7 @@ function computeSignature(): string {
     .map(o => `${o.id}:${o.status}:${o.assignedVehicleId ?? ''}`)
     .join('|');
   const vehiclePart = s.garage.vehicles
-    .map(v => `${v.id}:${v.status}:${v.level}:${v.quality}:${v.name}:${v.isEvolved}`)
+    .map(v => `${v.id}:${v.status}:${v.level}:${v.quality}:${v.name}`)
     .join('|');
   return `${orderPart}#${vehiclePart}`;
 }
@@ -99,7 +99,7 @@ export function renderOrders(): void {
       idle.forEach(v => {
         const opt = document.createElement('option');
         opt.value = v.id;
-        opt.textContent = `${QUALITY_ICONS[v.quality] || ''} ${v.name} Lv.${v.level}${v.isEvolved ? ' 🌟' : ''}`;
+        opt.textContent = `${QUALITY_ICONS[v.quality] || ''} ${v.name} Lv.${v.level}`;
         select!.appendChild(opt);
       });
       if (selectedVehicleByOrder[o.id] && idle.some(v => v.id === selectedVehicleByOrder[o.id])) {

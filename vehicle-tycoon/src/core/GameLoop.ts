@@ -9,7 +9,6 @@ import { OrderSystem } from '../systems/OrderSystem';
 import { FactorySystem } from '../systems/FactorySystem';
 import { TechSystem } from '../systems/TechSystem';
 import { EconomySystem } from '../systems/EconomySystem';
-import { IntimacySystem } from '../systems/IntimacySystem';
 import { AchievementSystem } from '../systems/AchievementSystem';
 import { EventSystem } from '../systems/EventSystem';
 import { SaveManager } from './SaveManager';
@@ -28,7 +27,6 @@ export class GameLoop {
   private factorySys!: FactorySystem;
   private techSys!: TechSystem;
   private economySys!: EconomySystem;
-  private intimacySys!: IntimacySystem;
   private achievementSys!: AchievementSystem;
   private eventSys!: EventSystem;
 
@@ -43,7 +41,6 @@ export class GameLoop {
     this.factorySys = new FactorySystem(this.state);
     this.techSys = new TechSystem(this.state);
     this.economySys = new EconomySystem(this.state);
-    this.intimacySys = new IntimacySystem(this.state);
     this.achievementSys = new AchievementSystem(this.state);
     this.eventSys = new EventSystem(this.state);
   }
@@ -142,7 +139,6 @@ export class GameLoop {
     factorySys: FactorySystem;
     techSys: TechSystem;
     economySys: EconomySystem;
-    intimacySys: IntimacySystem;
     achievementSys: AchievementSystem;
     eventSys: EventSystem;
   } {
@@ -152,7 +148,6 @@ export class GameLoop {
       factorySys: this.factorySys,
       techSys: this.techSys,
       economySys: this.economySys,
-      intimacySys: this.intimacySys,
       achievementSys: this.achievementSys,
       eventSys: this.eventSys,
     };

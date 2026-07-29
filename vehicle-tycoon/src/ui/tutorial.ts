@@ -40,8 +40,8 @@ const TUTORIAL_STEPS: TutorialStep[] = [
   },
   // ---- 以下为中期长期目标：玩家可能很久才达成，样式弱化、不阻塞游戏 ----
   {
-    title: '⬆ 给爱车升一次品质',
-    desc: '点开车辆详情 →「⬆ 提升品质」（白→蓝需要 10 单 + 500🪙 + 20⚙️）\n\n长期目标，跑单攒钱时顺手做就好',
+    title: '⬆ 给车升级一次规格',
+    desc: '点开车辆详情 →「⬆ 升级规格」（经济型→标准型需要 10 单 + 500🪙 + 20⚙️）\n\n长期目标，跑单攒钱时顺手做就好',
     target: '#garage',
     advanceOn: GameEvent.QUALITY_UPGRADED,
     manual: false,
@@ -49,10 +49,10 @@ const TUTORIAL_STEPS: TutorialStep[] = [
     doneCheck: s => s.garage.vehicles.some(v => qualityRank(v.quality) >= qualityRank(Quality.Blue)),
   },
   {
-    title: '🎯 给蓝车选一个专精',
-    desc: '蓝品质车在详情页可三选一专精（⚡快车 / 💪重载 / 🛡️稳健），永久生效\n\n选适合它跑单风格的就好',
+    title: '🎯 给标准型车选一个运营配置',
+    desc: '标准型及以上车辆在详情页可三选一运营配置（⚡快运 / 💪重载 / 🛡️耐用），永久生效\n\n选适合它跑单风格的就好',
     target: '#garage',
-    advanceOn: GameEvent.VEHICLE_STATS_CHANGED, // 专精/属性升级都会发此事件，靠 doneCheck 二次确认
+    advanceOn: GameEvent.VEHICLE_STATS_CHANGED, // 运营配置/属性升级都会发此事件，靠 doneCheck 二次确认
     manual: false,
     longterm: true,
     doneCheck: s => s.garage.vehicles.some(v => v.specialization !== null),
@@ -91,7 +91,7 @@ export function isTutorialActive(): boolean {
 function showTutorialStep(step: number): void {
   clearStepHooks();
 
-  // 跳过存档中已达成的步骤（如已有蓝品质车，则「升品质」步直接跳过）
+  // 跳过存档中已达成的步骤（如已有标准型车，则「升级规格」步直接跳过）
   while (step < TUTORIAL_STEPS.length) {
     const check = TUTORIAL_STEPS[step].doneCheck;
     if (check && check(getState())) { step++; continue; }
@@ -131,7 +131,7 @@ function showTutorialStep(step: number): void {
     const event = s.advanceOn;
     advanceEvent = event;
     advanceHandler = () => {
-      // 二次确认：事件来源多样（如属性升级与选专精同事件），未真正达成则继续等
+      // 二次确认：事件来源多样（如属性升级与选运营配置同事件），未真正达成则继续等
       if (s.doneCheck && !s.doneCheck(getState())) return;
       EventBus.off(event, advanceHandler!);
       advanceHandler = null;

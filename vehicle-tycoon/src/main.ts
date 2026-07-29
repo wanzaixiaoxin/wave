@@ -14,7 +14,7 @@ import { getBuildQueueMax } from './systems/FactorySystem';
 import { getUpgradeMult } from './systems/UpgradeSystem';
 
 import { setGameLoop, setRenderFn, requestRender, getState, getSystems } from './ui/context';
-import { getTraitName, pickRandomNames } from './ui/format';
+import { getTraitName } from './ui/format';
 import { showToast } from './ui/toast';
 import { showFloatingGold, showCritEffect, goldBounce } from './ui/effects';
 import { showModal, hideModal } from './ui/modal';
@@ -102,7 +102,7 @@ function renderAll(): void {
 function bindEvents(): void {
   const events = [
     GameEvent.VEHICLE_PRODUCED, GameEvent.VEHICLE_LEVEL_UP,
-    GameEvent.VEHICLE_EVOLVED, GameEvent.VEHICLE_RETIRED,
+    GameEvent.VEHICLE_RETIRED,
     GameEvent.ORDER_COMPLETED, GameEvent.ACHIEVEMENT_UNLOCKED,
     GameEvent.GARAGE_EXPANDED, GameEvent.FACTORY_UPGRADED,
     GameEvent.POWER_UPGRADED, GameEvent.TECH_RESEARCHED, GameEvent.RANDOM_EVENT_TRIGGERED,
@@ -129,10 +129,7 @@ function bindEvents(): void {
       case GameEvent.VEHICLE_PRODUCED: {
         const v = args[0] as Vehicle;
         const cfg = getVehicleConfig(v.tier);
-        // 出厂自动随机命名（不打断流程），想改名在车辆详情里随时改
-        const taken = getState().garage.vehicles.map(x => x.name);
-        const autoName = pickRandomNames(1, taken)[0];
-        if (autoName) getSystems().vehicleSys.nameVehicle(v.id, autoName);
+        // 车辆名称在落地时自动生成（车型名 + #编号）
         addLog(`🚗 新车出厂！${cfg?.emoji} ${v.name} [${getTraitName(v.trait)}]`);
         if (v.level > 1) {
           addLog(`🧬 传承生效！${cfg?.name} 起步就是 Lv.${v.level}`);
@@ -145,13 +142,6 @@ function bindEvents(): void {
         const v = args[0] as Vehicle;
         showToast(`⬆ ${v.name} 升级！`, `现在 Lv.${v.level}，收入提升`);
         addLog(`⬆ ${v.name} 升到 Lv.${v.level}！`);
-        break;
-      }
-      case GameEvent.VEHICLE_EVOLVED: {
-        const v = args[0] as Vehicle;
-        showToast('🌟 进化成功！', `${v.name} 形态蜕变，收入暴增！`);
-        addLog(`🌟 ${v.name} 进化了！`);
-        showModal('🌟 进化成功！', [`${v.name} 完成了形态蜕变！`, '收入大幅提升，获得专属天赋']);
         break;
       }
       case GameEvent.RANDOM_EVENT_TRIGGERED: {
@@ -208,8 +198,8 @@ function bindEvents(): void {
       }
       case GameEvent.QUALITY_UPGRADED: {
         const v = args[0] as Vehicle;
-        addLog(`⬆ ${v.name} 品质升级完成：${v.quality === 'blue' ? '⚪→🔵 精良' : '🔵→🟡 传说'}`);
-        showToast('⬆ 品质提升！', `${v.name}: ${v.quality === 'blue' ? '⚪→🔵' : '🔵→🟡'}`);
+        addLog(`⬆ ${v.name} 规格升级完成：${v.quality === 'blue' ? '⚪→🔵 标准型' : '🔵→🟡 工业型'}`);
+        showToast('⬆ 规格提升！', `${v.name}: ${v.quality === 'blue' ? '⚪→🔵 标准型' : '🔵→🟡 工业型'}`);
         break;
       }
       case GameEvent.OFFLINE_EARNINGS: {

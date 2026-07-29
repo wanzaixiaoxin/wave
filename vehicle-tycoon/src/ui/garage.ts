@@ -1,13 +1,13 @@
 // ============================================================
-// 车库 UI — 车辆卡片网格 + 车辆详情弹窗（派单/养成操作）
+// 车库 UI — 车辆卡片网格 + 车辆详情弹窗（派单/运营操作）
 // ============================================================
 
 import { Vehicle, Quality, TraitType, VehicleStats, Specialization } from '../core/types';
 import { getVehicleConfig, getUnmetRequirements, VEHICLE_CONFIGS } from '../config/VehicleConfig';
 import { GAME_CONSTANTS, statUpgradeCost } from '../config/GameConstants';
 import { getState, getSystems, requestRender } from './context';
-import { getTraitName, getTraitDesc, getQualityLabel, pickRandomNames } from './format';
-import { showModal, hideModal, showNamingModal } from './modal';
+import { getTraitName, getTraitDesc, getQualityLabel } from './format';
+import { showModal, hideModal } from './modal';
 import { showToast } from './toast';
 import { addLog } from './log';
 
@@ -33,9 +33,9 @@ export function renderGarage(): void {
     const card = document.createElement('div');
     card.className = `vehicle-card quality-${v.quality}`;
 
-    // 品质标签
-    const badge = v.quality === 'gold' ? '<span class="quality-badge gold-badge">传说</span>'
-      : v.quality === 'blue' ? '<span class="quality-badge blue-badge">精良</span>' : '';
+    // 规格角标
+    const badge = v.quality === 'gold' ? '<span class="quality-badge gold-badge">工业</span>'
+      : v.quality === 'blue' ? '<span class="quality-badge blue-badge">标准</span>' : '';
 
     const statusClass = v.status === 'idle' ? 'idle' : 'busy';
     const upgradeRemain = v.qualityUpgrade
@@ -47,8 +47,8 @@ export function renderGarage(): void {
         ? `⬆ 升级中 ${upgradeRemain}s`
         : '🚚 派单中';
     const traitName = getTraitName(v.trait);
-    const maxLv = vehicleSys.getMaxLevel(v.quality, v.isEvolved);
-    const SPEC_ICONS: Record<string, string> = { express: '⚡快车', heavy: '💪重载', steady: '🛡️稳健' };
+    const maxLv = vehicleSys.getMaxLevel(v.quality);
+    const SPEC_ICONS: Record<string, string> = { express: '⚡快运', heavy: '💪重载', steady: '🛡️耐用' };
     const specText = v.specialization ? ` · ${SPEC_ICONS[v.specialization]}` : '';
     const wearWarning = v.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD
       ? '<div style="text-align:center;color:var(--red);font-size:11px;font-weight:700;">🔧 磨损严重，收入-30%</div>'
@@ -61,10 +61,10 @@ export function renderGarage(): void {
       <div class="name">${v.name}</div>
       <div style="text-align:center;font-size:10px;color:var(--text-3);font-weight:700;">${config?.name || ''}</div>
       <div style="text-align:center;margin:4px 0;">
-        Lv.${v.level}/${maxLv} ${v.isEvolved ? '🌟' : ''}
+        Lv.${v.level}/${maxLv}
       </div>
       <div class="info">${traitName}${specText} ${v.trait === TraitType.Lucky ? '<span class="badge rare">稀有</span>' : ''}</div>
-      <div class="info">💖${v.intimacy} · 📦${v.ordersCompleted}单</div>
+      <div class="info">📦${v.ordersCompleted}单</div>
       ${wearWarning}
       <div style="text-align:center;margin-top:4px;"><span class="status-badge ${statusClass}">${statusText}</span></div>
     `;
@@ -78,49 +78,31 @@ export function renderGarage(): void {
 export function showVehicleDetail(v: Vehicle): void {
   const sys = getSystems();
   const config = getVehicleConfig(v.tier);
-  const maxLv = sys.vehicleSys.getMaxLevel(v.quality, v.isEvolved);
+  const maxLv = sys.vehicleSys.getMaxLevel(v.quality);
 
   const SPEC_INFO: Record<string, { icon: string; name: string; desc: string }> = {
-    express: { icon: '⚡', name: '快车', desc: '耗时 -25%，收入 -10%' },
+    express: { icon: '⚡', name: '快运', desc: '耗时 -25%，收入 -10%' },
     heavy: { icon: '💪', name: '重载', desc: '收入 +25%，耗时 +15%' },
-    steady: { icon: '🛡️', name: '稳健', desc: '磨损减半，经验 +15%' },
+    steady: { icon: '🛡️', name: '耐用', desc: '磨损减半，经验 +15%' },
   };
   const specLine = v.specialization
-    ? `<p>🎯 专精: ${SPEC_INFO[v.specialization].icon}${SPEC_INFO[v.specialization].name}（${SPEC_INFO[v.specialization].desc}）</p>`
+    ? `<p>🎯 运营配置: ${SPEC_INFO[v.specialization].icon}${SPEC_INFO[v.specialization].name}（${SPEC_INFO[v.specialization].desc}）</p>`
     : '';
   const wearColor = v.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD ? 'var(--red)' : 'var(--text-2)';
-  const wearLine = `<p style="color:${wearColor};">🔧 磨损 ${Math.floor(v.wear)}/100${v.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD ? '（收入-30% 耗时+20%，快保养！）' : ''} · 😮‍💨 连单 ${v.consecutiveOrders}（越多收入越低，空闲30秒恢复）</p>`;
+  const wearLine = `<p style="color:${wearColor};">🔧 磨损 ${Math.floor(v.wear)}/100${v.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD ? '（收入-30% 耗时+20%，快检修！）' : ''} · 😮‍💨 连单 ${v.consecutiveOrders}（越多收入越低，空闲30秒恢复）</p>`;
 
   const detail = `
     <p>${config?.emoji} <strong>${v.name}</strong> · T${v.tier} ${config?.name || ''}</p>
-    <p>📊 Lv.${v.level}/${maxLv} | 品质: ${getQualityLabel(v.quality)}</p>
-    <p>🧬 特质: ${getTraitName(v.trait)}${getTraitDesc(v.trait) ? `（${getTraitDesc(v.trait)}）` : ''} ${v.trait === TraitType.Lucky ? '🔥稀有' : ''}</p>
+    <p>📊 Lv.${v.level}/${maxLv} | 规格: ${getQualityLabel(v.quality)}</p>
+    <p>🧬 出厂参数: ${getTraitName(v.trait)}${getTraitDesc(v.trait) ? `（${getTraitDesc(v.trait)}）` : ''} ${v.trait === TraitType.Lucky ? '🔥稀有' : ''}</p>
     ${specLine}
-    <p>💖 亲密度 ${v.intimacy}/100</p>
     ${wearLine}
     <p>🏎️速度 ${v.stats.speed}/5（耗时-4%/级）· 📦载货 ${v.stats.cargo}/5（收入+4%/级）· 🔩耐久 ${v.stats.durability}/5（≥3 可接🏔️长途单）</p>
     <p>📦 ${v.ordersCompleted}单 · 🪙 ${v.totalEarnings.toLocaleString()}</p>
-    <p>${v.status === 'idle' ? '✅ 空闲' : v.status === 'maintenance' ? `⬆ 品质升级中，剩余 ${Math.max(0, Math.ceil(((v.qualityUpgrade?.finishAt ?? 0) - Date.now()) / 1000))}s` : '🚚 执行订单中'}</p>
-    ${v.isEvolved ? '<p style="color:var(--gold-strong);">🌟 已进化 — 获得专属天赋：' + (config?.talentDesc || '') + '</p>' : v.quality === Quality.Gold && v.level >= GAME_CONSTANTS.MAX_VEHICLE_LEVEL && v.intimacy >= GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT ? '<p style="color:var(--gold-strong);font-weight:600;">✨ 可以进化！</p>' : ''}
+    <p>${v.status === 'idle' ? '✅ 空闲' : v.status === 'maintenance' ? `⬆ 规格升级中，剩余 ${Math.max(0, Math.ceil(((v.qualityUpgrade?.finishAt ?? 0) - Date.now()) / 1000))}s` : '🚚 执行订单中'}</p>
   `;
 
   const buttons: (string | (() => void))[] = [];
-
-  // ---------- 改名（随时可改，非必要流程） ----------
-  buttons.push('✏️ 改名', () => {
-    const taken = getState().garage.vehicles.filter(x => x.id !== v.id).map(x => x.name);
-    showNamingModal(
-      `✏️ 给 ${v.name} 改名`,
-      v.name,
-      pickRandomNames(3, taken),
-      (name) => {
-        sys.vehicleSys.nameVehicle(v.id, name);
-        addLog(`✏️ 车辆改名为「${name}」`);
-        showVehicleDetail(v);
-        requestRender();
-      }
-    );
-  });
 
   // ---------- 派单 ----------
   if (v.status === 'idle') {
@@ -138,36 +120,15 @@ export function showVehicleDetail(v: Vehicle): void {
     });
   }
 
-  // ---------- 亲密度互动（清洗/保养/抚摸，各有冷却） ----------
-  const intimacy = sys.intimacySys;
-  const washCd = intimacy.getWashCooldownRemaining(v.id);
-  buttons.push(washCd > 0 ? `🛁 清洗(${Math.ceil(washCd / 60)}分钟)` : `🛁 清洗 +${GAME_CONSTANTS.INTIMACY_WASH_AMOUNT}💖`, () => {
-    if (intimacy.wash(v.id)) {
-      addLog(`🛁 清洗了 ${v.name}，亲密度 +${GAME_CONSTANTS.INTIMACY_WASH_AMOUNT}`);
+  // ---------- 检修（消耗零件，只清磨损，有冷却） ----------
+  const overhaulCd = sys.vehicleSys.getOverhaulCooldownRemaining(v.id);
+  buttons.push(overhaulCd > 0 ? `🔧 检修(${Math.ceil(overhaulCd / 60)}分钟)` : `🔧 检修·清磨损(${GAME_CONSTANTS.OVERHAUL_PARTS_COST}⚙️)`, () => {
+    if (sys.vehicleSys.overhaul(v.id)) {
+      addLog(`🔧 检修了 ${v.name}，磨损已清零（-${GAME_CONSTANTS.OVERHAUL_PARTS_COST}⚙️）`);
     } else {
-      addLog('🛁 清洗还在冷却中');
+      addLog(`🔧 检修冷却中或零件不足（需要 ${GAME_CONSTANTS.OVERHAUL_PARTS_COST}⚙️）`);
     }
     showVehicleDetail(v); // 重开弹窗刷新冷却/数值
-    requestRender();
-  });
-
-  const repairCd = intimacy.getRepairCooldownRemaining(v.id);
-  buttons.push(repairCd > 0 ? `🔧 保养(${Math.ceil(repairCd / 60)}分钟)` : `🔧 保养 +${GAME_CONSTANTS.INTIMACY_REPAIR_AMOUNT}💖·修磨损(2⚙️)`, () => {
-    if (intimacy.repair(v.id)) {
-      addLog(`🔧 保养了 ${v.name}，亲密度提升，磨损已修复（-2⚙️）`);
-    } else {
-      addLog('🔧 保养冷却中或零件不足（需要 2⚙️）');
-    }
-    showVehicleDetail(v);
-    requestRender();
-  });
-
-  const tapCd = intimacy.getTapCooldownRemaining(v.id);
-  buttons.push(tapCd > 0 ? `👆 抚摸(${tapCd}秒)` : `👆 抚摸 +${GAME_CONSTANTS.INTIMACY_TAP_AMOUNT}💖`, () => {
-    if (intimacy.tap(v.id)) {
-      addLog(`👆 摸了摸 ${v.name}，亲密度 +${GAME_CONSTANTS.INTIMACY_TAP_AMOUNT}`);
-    }
-    showVehicleDetail(v);
     requestRender();
   });
 
@@ -194,13 +155,13 @@ export function showVehicleDetail(v: Vehicle): void {
     });
   }
 
-  // ---------- 专精选择（蓝品质解锁，三选一，永久） ----------
+  // ---------- 运营配置选择（蓝规格解锁，三选一，永久） ----------
   if (!v.specialization && (v.quality === Quality.Blue || v.quality === Quality.Gold)) {
     for (const [key, info] of Object.entries(SPEC_INFO)) {
-      buttons.push(`${info.icon} 专精·${info.name}`, () => {
+      buttons.push(`${info.icon} 配置·${info.name}`, () => {
         if (sys.vehicleSys.specialize(v.id, key as Specialization)) {
-          showToast(`${info.icon} 专精确立！`, `${v.name} 成为「${info.name}」— ${info.desc}`);
-          addLog(`🎯 ${v.name} 选择了${info.name}专精（${info.desc}）`);
+          showToast(`${info.icon} 运营配置确立！`, `${v.name} 成为「${info.name}」— ${info.desc}`);
+          addLog(`🎯 ${v.name} 选择了${info.name}运营配置（${info.desc}）`);
         }
         showVehicleDetail(v);
         requestRender();
@@ -208,7 +169,7 @@ export function showVehicleDetail(v: Vehicle): void {
     }
   }
 
-  // ---------- 提升品质（M7：耗时化，升级中锁车不显示按钮；M8：耗电） ----------
+  // ---------- 升级规格（M7：耗时化，升级中锁车不显示按钮；M8：耗电） ----------
   if (v.quality !== Quality.Gold && !v.qualityUpgrade) {
     const upgradeTime = v.quality === Quality.White
       ? GAME_CONSTANTS.QUALITY_UPGRADE_TIME_BLUE
@@ -216,23 +177,14 @@ export function showVehicleDetail(v: Vehicle): void {
     const energyCost = v.quality === Quality.White
       ? GAME_CONSTANTS.ENERGY_QUALITY_BLUE
       : GAME_CONSTANTS.ENERGY_QUALITY_GOLD;
-    buttons.push(`⬆ 提升品质 (${upgradeTime}s · ${energyCost}⚡)`, () => {
+    buttons.push(`⬆ 升级规格 (${upgradeTime}s · ${energyCost}⚡)`, () => {
       if (sys.vehicleSys.upgradeQuality(v.id)) {
-        showToast('⬆ 开始升级', `${v.name} 进场升级品质，${upgradeTime} 秒后完成（期间不可派单）`);
-        addLog(`⬆ ${v.name} 开始升级品质（${upgradeTime}s · -${energyCost}⚡），期间锁定不可派单`);
+        showToast('⬆ 开始升级', `${v.name} 进场升级规格，${upgradeTime} 秒后完成（期间不可派单）`);
+        addLog(`⬆ ${v.name} 开始升级规格（${upgradeTime}s · -${energyCost}⚡），期间锁定不可派单`);
         hideModal();
       } else {
-        addLog(`❌ 品质升级条件不足（需要空闲 + 完成订单数/金币/零件/${energyCost}⚡能源）`);
+        addLog(`❌ 规格升级条件不足（需要空闲 + 完成订单数/金币/零件/${energyCost}⚡能源）`);
       }
-      requestRender();
-    });
-  }
-
-  // ---------- 进化（M8：耗 200⚡，品牌声望 +100） ----------
-  if (!v.isEvolved && v.quality === Quality.Gold && v.level >= GAME_CONSTANTS.MAX_VEHICLE_LEVEL && v.intimacy >= GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT) {
-    buttons.push(`🌟 进化 (${GAME_CONSTANTS.ENERGY_EVOLVE}⚡)`, () => {
-      if (sys.vehicleSys.evolve(v.id)) { hideModal(); }
-      else { addLog(`❌ 进化失败（需要 ${GAME_CONSTANTS.ENERGY_EVOLVE}⚡能源）`); }
       requestRender();
     });
   }

@@ -49,7 +49,7 @@ export const EN_ROUTE_EVENT_CONFIGS: EnRouteEventConfigEntry[] = [
     weight: 15,
     choices: [
       { label: '赶路', summary: '耗时 -15%', durationMult: 0.85 },
-      { label: '慢行', summary: '亲密度 +5', intimacyGain: 5, isDefault: true },
+      { label: '慢行', summary: '本单零件 +2', partsGain: 2, isDefault: true },
     ],
   },
   {

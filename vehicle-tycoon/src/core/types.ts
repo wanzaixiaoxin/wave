@@ -14,7 +14,7 @@ export enum Quality {
 export const QUALITY_ORDER: Quality[] = [Quality.White, Quality.Blue, Quality.Gold];
 
 /**
- * 品质数值等级（白=0 < 蓝=1 < 金=2）
+ * 规格数值等级（白=0 < 蓝=1 < 金=2）
  * 注意：Quality 是字符串枚举，禁止直接用 < / > 比较（字典序下 'white' > 'blue'）
  */
 export function qualityRank(quality: Quality): number {
@@ -46,39 +46,12 @@ export enum TraitRarity {
 }
 
 export enum TraitType {
-  Quick = 'quick',       // 勤快：订单耗时 -15%
-  Strong = 'strong',     // 强壮：收入 +20%
+  Quick = 'quick',       // 高速：订单耗时 -15%
+  Strong = 'strong',     // 重载：收入 +20%
   Precise = 'precise',   // 精准：暴击 +5%
-  Smart = 'smart',       // 聪明：经验 +20%
+  Smart = 'smart',       // 老练：经验 +20%
   Lucky = 'lucky',       // 幸运：暴击 ×3（稀有）
-  Wealth = 'wealth',     // 招财：收入 +10%
-}
-
-export enum TalentType {
-  Agile = 'agile',           // 独轮车: 速度 +20%
-  Endurance = 'endurance',   // 自行车: 连续2单
-  Noble = 'noble',           // 马车: 长途/贵重单收入 +30%
-  Speedster = 'speedster',   // 小汽车: 短途×2
-  Hauler = 'hauler',         // 卡车: 收入+50%
-  Convoy = 'convoy',         // 火车: 同型每辆+5%
-  Explorer = 'explorer',     // 轮船: 额外零件
-  Network = 'network',       // 飞机: 订单刷新+30%
-  Stellar = 'stellar',       // 火箭: 零件+50%
-  Warp = 'warp',             // 星际: 全车型+15%
-}
-
-export enum ChallengeType {
-  SpeedRush = 'speed_rush',
-  Survival = 'survival',
-  Randomizer = 'randomizer',
-}
-
-export enum ChallengeRank {
-  Bronze = 'bronze',
-  Silver = 'silver',
-  Gold = 'gold',
-  Diamond = 'diamond',
-  Legend = 'legend',
+  Wealth = 'wealth',     // 节能：收入 +10%
 }
 
 export enum TechLevel {
@@ -92,9 +65,7 @@ export enum TechLevel {
 export enum GameEvent {
   // 车辆事件
   VEHICLE_PRODUCED = 'vehicle:produced',
-  VEHICLE_NAMED = 'vehicle:named',
   VEHICLE_LEVEL_UP = 'vehicle:level_up',
-  VEHICLE_EVOLVED = 'vehicle:evolved',
   VEHICLE_RETIRED = 'vehicle:retired',
   VEHICLE_TRAIT_INHERITED = 'vehicle:trait_inherited',
   VEHICLE_STATS_CHANGED = 'vehicle:stats_changed',
@@ -123,16 +94,11 @@ export enum GameEvent {
   GARAGE_EXPANDED = 'garage:expanded',
   GARAGE_FULL = 'garage:full',
 
-  // 养成事件
-  INTIMACY_CHANGED = 'intimacy:changed',
+  // 规格事件
   QUALITY_UPGRADED = 'quality:upgraded',
 
   // 成就事件
   ACHIEVEMENT_UNLOCKED = 'achievement:unlocked',
-
-  // 终局事件
-  CHALLENGE_COMPLETED = 'challenge:completed',
-  PRESTIGE_RESET = 'prestige:reset',
 
   // 离线事件
   OFFLINE_EARNINGS = 'offline:earnings',
@@ -155,12 +121,12 @@ export interface VehicleStats {
 }
 
 /**
- * 车辆专精 — 蓝品质解锁，三选一，永久互斥
+ * 车辆运营配置 — 蓝规格解锁，三选一，永久互斥
  */
 export enum Specialization {
-  Express = 'express',   // 快车：耗时 -25%，收入 -10%
+  Express = 'express',   // 快运：耗时 -25%，收入 -10%
   Heavy = 'heavy',       // 重载：收入 +25%，耗时 +15%
-  Steady = 'steady',     // 稳健：磨损减半，经验 +15%
+  Steady = 'steady',     // 耐用：磨损减半，经验 +15%
 }
 
 export interface Vehicle {
@@ -171,9 +137,7 @@ export interface Vehicle {
   exp: number;
   quality: Quality;
   trait: TraitType | null;
-  intimacy: number;                // 0-100
   stats: VehicleStats;
-  isEvolved: boolean;
   specialization: Specialization | null;
   wear: number;                    // 磨损 0-100，≥70 收入 -30%、耗时 +20%
   consecutiveOrders: number;       // 连续接单数（疲劳），空闲 30 秒重置
@@ -183,7 +147,7 @@ export interface Vehicle {
   createdAt: number;
   status: VehicleStatus;
   statusEndAt: number;             // 0 = no limit
-  qualityUpgrade: QualityUpgradeJob | null;  // 进行中的品质升级（M7），null = 无
+  qualityUpgrade: QualityUpgradeJob | null;  // 进行中的规格升级（M7），null = 无
 }
 
 export interface Order {
@@ -233,7 +197,7 @@ export interface ActiveResearch {
   finishAt: number;    // 完成时间戳（毫秒）
 }
 
-/** 进行中的品质升级（M7）：期间车辆 status = Maintenance */
+/** 进行中的规格升级（M7）：期间车辆 status = Maintenance */
 export interface QualityUpgradeJob {
   target: Quality;
   totalTime: number;   // 总耗时（秒）
@@ -272,7 +236,7 @@ export interface TechTree {
 export interface Resources {
   gold: number;
   parts: number;
-  energy: number;       // ⚡ 能源（M8）：企业动力源，电站产出，造车/升品/进化/派单消耗
+  energy: number;       // ⚡ 能源（M8）：企业动力源，电站产出，造车/升级规格/派单消耗
   reputation: number;   // 📈 声望（M8）：企业品牌口碑，高 tier 车型市场准入门槛
 }
 
@@ -295,9 +259,8 @@ export interface Achievement {
 }
 
 export interface AchievementCondition {
-  type: 'produce_count' | 'evolve_count' | 'intimacy_max'
-       | 'quality_count' | 'trait_collect' | 'profit_total'
-       | 'order_count' | 'prestige_count' | 'stats_max'
+  type: 'produce_count' | 'quality_count' | 'profit_total'
+       | 'order_count' | 'stats_max' | 'tradein_count'
        | 'total_orders' | 'tech_level' | 'factory_level'
        | 'inherit_count' | 'side_tech_count';
   target: number;
@@ -308,39 +271,16 @@ export interface AchievementReward {
   gold?: number;
   parts?: number;
   title?: string;
-  skin?: string;
 }
 
 export interface GameStats {
   totalGoldEarned: number;
   totalVehiclesProduced: number;
   totalOrdersCompleted: number;
-  totalEvolutions: number;
+  totalTradeIns: number;            // 以旧换新累计次数
   totalVehiclesInherited: number;   // 触发传承（新车继承经验）的次数
   totalPlayTime: number;
   offlineTime: number;
-}
-
-export interface PrestigeData {
-  count: number;
-  points: number;
-  purchases: string[];
-}
-
-export interface ChallengeData {
-  speedRush: {
-    bestScore: number;
-    rank: ChallengeRank;
-    dailyAttempts: number;
-  };
-  survival: {
-    isUnlocked: boolean;
-    bestProgress: number;
-  };
-  randomizer: {
-    bestScore: number;
-    completedRuns: number;
-  };
 }
 
 export interface GameSettings {
@@ -358,8 +298,6 @@ export interface SaveData {
   techTree: TechTree;
   achievements: Achievement[];
   stats: GameStats;
-  prestige: PrestigeData;
-  challenge: ChallengeData;
   settings: GameSettings;
 }
 
@@ -393,9 +331,6 @@ export interface VehicleConfigEntry {
     produceTier?: number;    // 需累计生产某车型
     produceCount?: number;   // …N 辆
   };
-  evolvedName: string;
-  talentType: TalentType;
-  talentDesc: string;
 }
 
 export interface TechConfigEntry {
@@ -483,8 +418,8 @@ export interface EnRouteEventChoice {
   wearDelta?: number;           // 磨损增减
   rewardMult?: number;          // 本单收入倍率（累乘到 order.pendingRewardMult）
   partsCost?: number;           // 零件消耗（零件不足时该选项不可选）
+  partsGain?: number;           // 零件获得（立即入账）
   goldCostPct?: number;         // 金币消耗（按本单期望收入百分比）
-  intimacyGain?: number;        // 亲密度增加
 }
 
 export interface EnRouteEventConfigEntry {
@@ -499,7 +434,7 @@ export interface EnRouteEventConfigEntry {
 // ==================== 运行时状态 ====================
 
 export interface GameState {
-  phase: 'playing' | 'challenge' | 'prestige';
+  phase: 'playing';
   resources: Resources;
   garage: Garage;
   factory: Factory;
@@ -508,13 +443,11 @@ export interface GameState {
   activeEvents: ActiveEvent[];
   achievements: Achievement[];
   stats: GameStats;
-  prestige: PrestigeData;
-  challenge: ChallengeData;
   settings: GameSettings;
 }
 
 export interface UIState {
-  currentView: 'garage' | 'factory' | 'tech' | 'achievement' | 'challenge' | 'memorial';
+  currentView: 'garage' | 'factory' | 'tech' | 'achievement';
   selectedVehicleId: string | null;
   visibleModal: string | null;
   notifications: string[];

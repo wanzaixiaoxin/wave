@@ -17,7 +17,6 @@ import { OrderSystem } from '../src/systems/OrderSystem';
 import { FactorySystem } from '../src/systems/FactorySystem';
 import { TechSystem } from '../src/systems/TechSystem';
 import { EconomySystem } from '../src/systems/EconomySystem';
-import { IntimacySystem } from '../src/systems/IntimacySystem';
 import { EventBus } from '../src/core/EventBus';
 import { GameEvent, Order, Vehicle } from '../src/core/types';
 import { getUnlockedConfigs, getVehicleConfig } from '../src/config/VehicleConfig';
@@ -32,7 +31,6 @@ const orderSys = new OrderSystem(state);
 const factorySys = new FactorySystem(state);
 const techSys = new TechSystem(state);
 const economySys = new EconomySystem(state);
-const intimacySys = new IntimacySystem(state);
 
 // 模拟玩家策略：路上事件触发后，在可选项内随机选一项立即决策
 EventBus.on(GameEvent.EN_ROUTE_EVENT_TRIGGERED, (...args: unknown[]) => {
@@ -90,7 +88,7 @@ function readRes(key: ResKey): number {
 const initialRes: Record<ResKey, number> = { gold: readRes('gold'), parts: readRes('parts'), energy: readRes('energy'), rep: readRes('rep') };
 
 // ---- 决策密度：每个成功动作计数，按 10 分钟分段 ----
-const ACTION_KEYS = ['造车入队', '主线研究', '子科技', '支线', '改造', '升品质', '置换', '电站升级', '工厂升级', '营销', '超负荷'] as const;
+const ACTION_KEYS = ['造车入队', '主线研究', '子科技', '支线', '改造', '升规格', '置换', '电站升级', '工厂升级', '营销', '超负荷'] as const;
 type ActionKey = typeof ACTION_KEYS[number];
 const zeroActions = (): Record<ActionKey, number> =>
   Object.fromEntries(ACTION_KEYS.map(k => [k, 0])) as Record<ActionKey, number>;
@@ -254,9 +252,9 @@ for (let t = 0; t < SIM_SECONDS; t++) {
     }
   }
 
-  // 4. 保养磨损车
+  // 4. 检修磨损车（只清磨损）
   for (const v of state.garage.vehicles) {
-    if (v.wear >= 70 && state.resources.parts >= 2) intimacySys.repair(v.id);
+    if (v.wear >= 70 && state.resources.parts >= 2) vehicleSys.overhaul(v.id);
   }
 
   // 5. 造车：新 tier 必买（升级时刻）；资金充裕时补充/更新车队（含解锁条件的产量打磨）
@@ -302,10 +300,10 @@ for (let t = 0; t < SIM_SECONDS; t++) {
   ep('建造队列满', queueBlocked, t);
   ep('车库满且无法置换', garageBlocked, t);
 
-  // 6. 升品质：给最高 tier 车升（有钱有零件）
+  // 6. 升级规格：给最高 tier 车升（有钱有零件）
   const main = [...state.garage.vehicles].sort((a, b) => b.tier - a.tier)[0];
   if (main) {
-    if (vehicleSys.upgradeQuality(main.id)) act('升品质', t);
+    if (vehicleSys.upgradeQuality(main.id)) act('升规格', t);
   }
 
   // ---- 里程碑 ----
@@ -317,7 +315,6 @@ for (let t = 0; t < SIM_SECONDS; t++) {
       mark(`造出 T${tier}`);
     }
   }
-  if (state.stats.totalEvolutions >= 1) mark('首次进化');
 
   // ---- 内容耗尽时刻（单调达成，只记首次） ----
   if (state.techTree.currentLevel >= 5

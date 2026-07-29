@@ -3,14 +3,14 @@
 // ============================================================
 
 import { EventBus } from './EventBus';
-import { GameEvent, SaveData, OfflineResult, GameState, ChallengeRank, OrderType } from './types';
+import { GameEvent, SaveData, OfflineResult, GameState, OrderType } from './types';
 import { GAME_CONSTANTS } from '../config/GameConstants';
 import { getVehicleConfig } from '../config/VehicleConfig';
 import { EconomySystem, getGlobalIncomeMult } from '../systems/EconomySystem';
 import { getUpgradeMult } from '../systems/UpgradeSystem';
 
 const SAVE_KEY = 'tycoon_save_v1';
-const SAVE_VERSION = '1.3'; // 1.3：科技与工厂深度扩展（子科技/支线 3 阶/改造线）；老档不迁移，版本不匹配直接开新局
+const SAVE_VERSION = '2.0'; // 2.0：纯经营转型 S0（删命名/亲密度/进化/Prestige/Challenge）；老档不迁移，版本不匹配直接开新局
 const MAX_OFFLINE_SECONDS = 2 * 3600; // 2 hours
 const OFFLINE_EFFICIENCY = 0.4;
 
@@ -32,8 +32,6 @@ export class SaveManager {
         techTree: state.techTree,
         achievements: state.achievements,
         stats: state.stats,
-        prestige: state.prestige,
-        challenge: state.challenge,
         settings: state.settings,
       };
       const json = JSON.stringify(data);
@@ -157,7 +155,7 @@ export class SaveManager {
   }
 
   /**
-   * 删除存档（用于轮回重置）
+   * 删除存档（用于重置游戏）
    */
   static deleteSave(): void {
     localStorage.removeItem(SAVE_KEY);
@@ -202,20 +200,10 @@ export class SaveManager {
         totalGoldEarned: 0,
         totalVehiclesProduced: 0,
         totalOrdersCompleted: 0,
-        totalEvolutions: 0,
+        totalTradeIns: 0,
         totalVehiclesInherited: 0,
         totalPlayTime: 0,
         offlineTime: 0,
-      },
-      prestige: {
-        count: 0,
-        points: 0,
-        purchases: [],
-      },
-      challenge: {
-        speedRush: { bestScore: 0, rank: ChallengeRank.Bronze, dailyAttempts: 0 },
-        survival: { isUnlocked: false, bestProgress: 0 },
-        randomizer: { bestScore: 0, completedRuns: 0 },
       },
       settings: {
         soundEnabled: true,

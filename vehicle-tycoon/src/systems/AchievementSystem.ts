@@ -37,32 +37,18 @@ export class AchievementSystem {
       reward: { title: '全能选手' },
     },
     {
-      id: 'soulmate',
-      name: '至死不渝',
-      description: '与同一辆车亲密度达到 100',
-      condition: { type: 'intimacy_max', target: 100 },
-      reward: { title: '最好的伙伴' },
-    },
-    {
       id: 'big_family',
       name: '大家族',
-      description: '同时拥有 10 辆传说品质车',
+      description: '同时拥有 10 辆工业型规格车',
       condition: { type: 'quality_count', target: 10 },
-      reward: { skin: '星光大道' },
+      reward: { gold: 20000, parts: 2000 },
     },
     {
-      id: 'evolution_master',
-      name: '进化狂人',
-      description: '完成第一次进化',
-      condition: { type: 'evolve_count', target: 1 },
+      id: 'tradein_master',
+      name: '更新换代',
+      description: '累计以旧换新 5 次',
+      condition: { type: 'tradein_count', target: 5 },
       reward: { gold: 1000, parts: 100 },
-    },
-    {
-      id: 'rainbow_team',
-      name: '彩虹战队',
-      description: '集齐 6 种不同性格特质的传说车',
-      condition: { type: 'trait_collect', target: 6 },
-      reward: { skin: '彩虹战队' },
     },
     {
       id: 'produce_10',
@@ -161,24 +147,8 @@ export class AchievementSystem {
       case 'produce_count':
         return this.state.stats.totalVehiclesProduced >= condition.target;
 
-      case 'evolve_count':
-        return this.state.stats.totalEvolutions >= condition.target;
-
-      case 'intimacy_max':
-        return this.state.garage.vehicles.some(v => v.intimacy >= condition.target);
-
       case 'quality_count':
         return this.state.garage.vehicles.filter(v => v.quality === 'gold').length >= condition.target;
-
-      case 'trait_collect': {
-        const traits = new Set(
-          this.state.garage.vehicles
-            .filter(v => v.quality === 'gold')
-            .map(v => v.trait)
-            .filter(Boolean)
-        );
-        return traits.size >= condition.target;
-      }
 
       case 'stats_max':
         return this.state.garage.vehicles.some(
@@ -191,8 +161,8 @@ export class AchievementSystem {
       case 'order_count':
         return this.state.garage.vehicles.some(v => v.ordersCompleted >= condition.target);
 
-      case 'prestige_count':
-        return this.state.prestige.count >= condition.target;
+      case 'tradein_count':
+        return this.state.stats.totalTradeIns >= condition.target;
 
       case 'total_orders':
         return this.state.stats.totalOrdersCompleted >= condition.target;
@@ -243,23 +213,9 @@ export class AchievementSystem {
 
     switch (condition.type) {
       case 'produce_count': current = this.state.stats.totalVehiclesProduced; break;
-      case 'evolve_count': current = this.state.stats.totalEvolutions; break;
-      case 'intimacy_max':
-        current = Math.max(...this.state.garage.vehicles.map(v => v.intimacy), 0);
-        break;
       case 'quality_count':
         current = this.state.garage.vehicles.filter(v => v.quality === 'gold').length;
         break;
-      case 'trait_collect': {
-        const traits = new Set(
-          this.state.garage.vehicles
-            .filter(v => v.quality === 'gold')
-            .map(v => v.trait)
-            .filter(Boolean)
-        );
-        current = traits.size;
-        break;
-      }
       case 'stats_max':
         current = Math.max(
           ...this.state.garage.vehicles.map(v => v.stats.speed + v.stats.cargo + v.stats.durability),
@@ -270,7 +226,7 @@ export class AchievementSystem {
       case 'order_count':
         current = Math.max(...this.state.garage.vehicles.map(v => v.ordersCompleted), 0);
         break;
-      case 'prestige_count': current = this.state.prestige.count; break;
+      case 'tradein_count': current = this.state.stats.totalTradeIns; break;
       case 'total_orders': current = this.state.stats.totalOrdersCompleted; break;
       case 'tech_level': current = this.state.techTree.currentLevel; break;
       case 'factory_level': current = this.state.factory.level; break;

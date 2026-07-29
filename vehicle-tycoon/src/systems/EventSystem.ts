@@ -102,15 +102,6 @@ const EVENT_TEMPLATES: EventTemplate[] = [
     duration: 0,
     description: '随机获得 10-50 金币',
   },
-  {
-    id: 'double_intimacy',
-    name: '双倍亲密度',
-    probability: 0.002,
-    effectType: 'intimacy_mult',
-    effectValue: 2.0,
-    duration: 60,
-    description: '所有互动亲密度 ×2',
-  },
 ];
 
 export class EventSystem {

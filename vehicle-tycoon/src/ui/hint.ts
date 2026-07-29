@@ -5,7 +5,6 @@
 // ============================================================
 
 import { GameState, Quality, qualityRank } from '../core/types';
-import { GAME_CONSTANTS } from '../config/GameConstants';
 import { getUnlockedConfigs } from '../config/VehicleConfig';
 import { getTechConfig } from '../config/TechConfig';
 import { getState, getSystems } from './context';
@@ -42,7 +41,7 @@ function getMainVehicle(state: GameState) {
 
 /**
  * 计算当前提示（优先级从高到低）：
- * 1. 科技可研究 2. 可进化 3. 车库将满 4. 蓝车未选专精 5. 主力车磨损≥70 6. 默认攒钱造下一 tier
+ * 1. 科技可研究 2. 车库将满 3. 蓝车未选运营配置 4. 主力车磨损≥70 5. 默认攒钱造下一 tier
  */
 export function computeHint(state: GameState, nextTech: NextTechInfo | null): Hint | null {
   const vehicles = state.garage.vehicles;
@@ -57,22 +56,7 @@ export function computeHint(state: GameState, nextTech: NextTechInfo | null): Hi
     };
   }
 
-  // 2. 有可进化的车（金品质 + 满级 + 亲密度≥80）→ 打开详情
-  const evolvable = vehicles.find(v =>
-    !v.isEvolved &&
-    v.quality === Quality.Gold &&
-    v.level >= GAME_CONSTANTS.MAX_VEHICLE_LEVEL &&
-    v.intimacy >= GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT
-  );
-  if (evolvable) {
-    return {
-      icon: '🌟',
-      text: `${evolvable.name} 可以进化了！形态蜕变，收入暴增`,
-      action: { type: 'vehicle', vehicleId: evolvable.id },
-    };
-  }
-
-  // 3. 车库已满或差 1 格满 → 切车库 Tab（扩建/拆解）
+  // 2. 车库已满或差 1 格满 → 切车库 Tab（扩建/拆解）
   const free = state.garage.maxCapacity - vehicles.length;
   if (free <= 1 && state.garage.maxCapacity > 0) {
     return {
@@ -84,29 +68,29 @@ export function computeHint(state: GameState, nextTech: NextTechInfo | null): Hi
     };
   }
 
-  // 4. 有蓝品质及以上但未选专精的车 → 打开详情
+  // 3. 有蓝规格及以上但未选运营配置的车 → 打开详情
   const unspec = vehicles.find(v =>
     !v.specialization && qualityRank(v.quality) >= qualityRank(Quality.Blue)
   );
   if (unspec) {
     return {
       icon: '🎯',
-      text: `${unspec.name} 还没选专精，详情页三选一（快车/重载/稳健）`,
+      text: `${unspec.name} 还没选运营配置，详情页三选一（快运/重载/耐用）`,
       action: { type: 'vehicle', vehicleId: unspec.id },
     };
   }
 
-  // 5. 主力车磨损 ≥70 → 打开详情（建议保养）
+  // 4. 主力车磨损 ≥70 → 打开详情（建议检修）
   const main = getMainVehicle(state);
   if (main && main.wear >= 70) {
     return {
       icon: '🔧',
-      text: `主力车 ${main.name} 磨损 ${Math.floor(main.wear)}%，该保养了（≥80 收入打折）`,
+      text: `主力车 ${main.name} 磨损 ${Math.floor(main.wear)}%，该检修了（≥80 收入打折）`,
       action: { type: 'vehicle', vehicleId: main.id },
     };
   }
 
-  // 6. 默认：攒钱造下一 tier 车型（时代差异化矩阵全维度已解锁（M9）的最高 tier）
+  // 5. 默认：攒钱造下一 tier 车型（时代差异化矩阵全维度已解锁（M9）的最高 tier）
   const unlocked = getUnlockedConfigs(state);
   const target = unlocked[unlocked.length - 1];
   if (!target) return null;

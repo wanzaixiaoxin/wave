@@ -3,7 +3,7 @@
 // ============================================================
 
 import { EventBus } from '../core/EventBus';
-import { GameEvent, GameState, Vehicle, Quality, OrderType, TalentType, Specialization } from '../core/types';
+import { GameEvent, GameState, Vehicle, Quality, OrderType, Specialization } from '../core/types';
 import { getVehicleConfig } from '../config/VehicleConfig';
 import { getTraitConfig } from '../config/TraitConfig';
 import { GAME_CONSTANTS, garageExpandCost } from '../config/GameConstants';
@@ -16,55 +16,6 @@ export function getGlobalIncomeMult(state: GameState): number {
   return state.techTree.currentLevel >= 5
     ? GAME_CONSTANTS.TECH_GLOBAL_INCOME_MULT
     : 1.0;
-}
-
-/**
- * 进化天赋带来的收入倍率（未进化为 1）
- * 需要 state 的天赋：T6 火车（同型车数量）、T10 星际飞船（全厂光环）
- */
-export function getTalentIncomeMult(vehicle: Vehicle, state?: GameState, orderType?: OrderType): number {
-  if (!vehicle.isEvolved) return 1.0;
-  const talent = getVehicleConfig(vehicle.tier)?.talentType;
-  let mult = 1.0;
-
-  switch (talent) {
-    case TalentType.Noble:
-      // T3 马车：长途/贵重单收入加成
-      if (orderType === OrderType.LongDistance || orderType === OrderType.Valuable) {
-        mult *= GAME_CONSTANTS.TALENT_NOBLE_HIGH_ORDER_MULT;
-      }
-      break;
-    case TalentType.Speedster:
-      // T4 小汽车：短途（普通）订单收入 ×2
-      if (orderType === OrderType.Normal) {
-        mult *= GAME_CONSTANTS.TALENT_SPEEDSTER_NORMAL_MULT;
-      }
-      break;
-    case TalentType.Hauler:
-      mult *= GAME_CONSTANTS.TALENT_HAULER_INCOME_MULT;
-      break;
-    case TalentType.Convoy: {
-      // T6 火车：车库中同型车每 1 辆 +5%
-      if (state) {
-        const sameTier = state.garage.vehicles.filter(v => v.tier === vehicle.tier).length;
-        mult *= 1 + sameTier * GAME_CONSTANTS.TALENT_CONVOY_PER_VEHICLE;
-      }
-      break;
-    }
-  }
-
-  // T10 星际飞船光环：车库中每艘进化飞船使全车型收入 ×1.15（最多叠 2 层，抗膨胀）
-  if (state) {
-    const warpCount = Math.min(
-      state.garage.vehicles.filter(
-        v => v.isEvolved && getVehicleConfig(v.tier)?.talentType === TalentType.Warp
-      ).length,
-      GAME_CONSTANTS.TALENT_WARP_MAX_STACKS
-    );
-    mult *= Math.pow(GAME_CONSTANTS.TALENT_WARP_GLOBAL_MULT, warpCount);
-  }
-
-  return mult;
 }
 
 export class EconomySystem {
@@ -102,8 +53,8 @@ export class EconomySystem {
   /**
    * 计算单次订单收入（唯一的收入计算入口）
    * @param rollCrit true=真实掷暴击（结算用）；false=按期望值折算（估算用，结果确定）
-   * @param state 提供后启用：进化倍率、载货属性、强壮特质、进化天赋、牛市/熊市事件
-   * @param orderType 订单类型（影响 T3/T4 天赋判定）
+   * @param state 提供后启用：载货属性、重载出厂参数、牛市/熊市事件
+   * @param orderType 订单类型（预留参数，供订单类型相关加成使用）
    */
   static calculateOrderIncome(
     vehicle: Vehicle,
@@ -125,7 +76,7 @@ export class EconomySystem {
 
     let income = Math.floor(basePrice * levelMult * qualityMult * orderTypeMult * globalMult);
 
-    // 特质加成（招财）
+    // 出厂参数加成（节能）
     if (vehicle.trait) {
       const tc = getTraitConfig(vehicle.trait);
       if (tc?.effectType === 'income') {
@@ -137,7 +88,7 @@ export class EconomySystem {
       // 载货属性：每级收入 +4%
       income = Math.floor(income * (1 + vehicle.stats.cargo * GAME_CONSTANTS.CARGO_INCOME_PER_LEVEL));
 
-      // 强壮特质：载货加成转化为收入加成
+      // 重载出厂参数：载货加成转化为收入加成
       if (vehicle.trait) {
         const tc = getTraitConfig(vehicle.trait);
         if (tc?.effectType === 'cargo') {
@@ -145,20 +96,12 @@ export class EconomySystem {
         }
       }
 
-      // 专精收入修正（快车 -10% / 重载 +25%）
+      // 运营配置收入修正（快运 -10% / 重载 +25%）
       if (vehicle.specialization === Specialization.Express) {
         income = Math.floor(income * GAME_CONSTANTS.SPEC_EXPRESS_INCOME_MULT);
       } else if (vehicle.specialization === Specialization.Heavy) {
         income = Math.floor(income * GAME_CONSTANTS.SPEC_HEAVY_INCOME_MULT);
       }
-
-      // 进化：收入 ×3
-      if (vehicle.isEvolved) {
-        income = Math.floor(income * GAME_CONSTANTS.EVOLVED_INCOME_MULT);
-      }
-
-      // 进化天赋（含 T10 全厂光环）
-      income = Math.floor(income * getTalentIncomeMult(vehicle, state, orderType));
 
       // 牛市/熊市事件
       income = Math.floor(income * getEventMultiplier(state, 'price_mult'));
@@ -176,7 +119,7 @@ export class EconomySystem {
       income = Math.floor(income * fatigueMult);
     }
 
-    // 暴击（基础 5%，含「精准」特质暴击率加成、「幸运」特质暴击倍率）
+    // 暴击（基础 5%，含「精准」出厂参数暴击率加成、「幸运」出厂参数暴击倍率）
     let critRate = 0.05;
     let critMult = GAME_CONSTANTS.CRIT_MULT_DEFAULT;
     if (vehicle.trait) {

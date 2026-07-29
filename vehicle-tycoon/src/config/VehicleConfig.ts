@@ -12,7 +12,7 @@
 // - 电气/航天时代（T8-T10）：靠科技 + 电站等级（能源与精密制造）+ 声望
 // ============================================================
 
-import { GameState, VehicleConfigEntry, TalentType } from '../core/types';
+import { GameState, VehicleConfigEntry } from '../core/types';
 
 export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
   {
@@ -25,9 +25,6 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     parkingSpaces: 1,
     partsCost: 0,
     unlock: {},
-    evolvedName: '涡轮独轮车',
-    talentType: TalentType.Agile,
-    talentDesc: '订单完成速度 +20%',
   },
   {
     tier: 2,
@@ -39,9 +36,6 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     parkingSpaces: 1,
     partsCost: 0,
     unlock: { produceTier: 1, produceCount: 3 },
-    evolvedName: '电动自行车',
-    talentType: TalentType.Endurance,
-    talentDesc: '可连续接 2 单',
   },
   {
     tier: 3,
@@ -53,9 +47,6 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     parkingSpaces: 1,
     partsCost: 0,
     unlock: { produceTier: 2, produceCount: 3 },
-    evolvedName: '豪华马车',
-    talentType: TalentType.Noble,
-    talentDesc: '长途/贵重订单收入 +30%',
   },
   {
     tier: 4,
@@ -67,9 +58,6 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     parkingSpaces: 2,
     partsCost: 20,
     unlock: { techLevel: 2, reputation: 100 },
-    evolvedName: '跑车',
-    talentType: TalentType.Speedster,
-    talentDesc: '短途订单收入 ×2',
   },
   {
     tier: 5,
@@ -81,9 +69,6 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     parkingSpaces: 2,
     partsCost: 60,
     unlock: { techLevel: 2, factoryLevel: 3, reputation: 250 },
-    evolvedName: '擎天柱',
-    talentType: TalentType.Hauler,
-    talentDesc: '单次收入 +50%',
   },
   {
     tier: 6,
@@ -95,9 +80,6 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     parkingSpaces: 2,
     partsCost: 200,
     unlock: { techLevel: 3, factoryLevel: 4, reputation: 500 },
-    evolvedName: '磁悬浮列车',
-    talentType: TalentType.Convoy,
-    talentDesc: '同型车每多 1 辆 +5% 收入',
   },
   {
     tier: 7,
@@ -109,9 +91,6 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     parkingSpaces: 3,
     partsCost: 600,
     unlock: { techLevel: 3, factoryLevel: 5, reputation: 1000 },
-    evolvedName: '豪华邮轮',
-    talentType: TalentType.Explorer,
-    talentDesc: '每次订单额外获得零件',
   },
   {
     tier: 8,
@@ -123,9 +102,6 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     parkingSpaces: 3,
     partsCost: 2000,
     unlock: { techLevel: 4, powerLevel: 4, reputation: 2000 },
-    evolvedName: '超音速客机',
-    talentType: TalentType.Network,
-    talentDesc: '所有订单刷新速度 +30%',
   },
   {
     tier: 9,
@@ -137,9 +113,6 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     parkingSpaces: 4,
     partsCost: 4000,
     unlock: { techLevel: 4, factoryLevel: 7, powerLevel: 6, reputation: 5000 },
-    evolvedName: '可回收重型火箭',
-    talentType: TalentType.Stellar,
-    talentDesc: '零件产出 +50%',
   },
   {
     tier: 10,
@@ -151,9 +124,6 @@ export const VEHICLE_CONFIGS: VehicleConfigEntry[] = [
     parkingSpaces: 4,
     partsCost: 12000,
     unlock: { techLevel: 5, factoryLevel: 9, powerLevel: 8, reputation: 6000 },
-    evolvedName: '超光速飞船',
-    talentType: TalentType.Warp,
-    talentDesc: '全车型收入 +15%（最多叠 2 层）',
   },
 ];
 

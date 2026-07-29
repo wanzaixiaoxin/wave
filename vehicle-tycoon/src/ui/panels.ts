@@ -42,8 +42,6 @@ export function renderTopBar(): void {
       mBtn.disabled = s.resources.gold < GAME_CONSTANTS.MARKETING_GOLD_COST;
     }
   }
-  document.getElementById('intimacy-sum')!.textContent =
-    s.garage.vehicles.reduce((sum, v) => sum + v.intimacy, 0).toString();
 
   const highestTier = s.garage.vehicles.length > 0
     ? Math.max(...s.garage.vehicles.map(v => v.tier)) : 1;
@@ -503,7 +501,6 @@ export function renderAchievements(): void {
       a.reward.gold ? `${a.reward.gold.toLocaleString()}🪙` : '',
       a.reward.parts ? `${a.reward.parts}⚙️` : '',
       a.reward.title ? `称号「${a.reward.title}」` : '',
-      a.reward.skin ? `皮肤「${a.reward.skin}」` : '',
     ].filter(Boolean).join(' ');
     div.innerHTML = `
       <div>

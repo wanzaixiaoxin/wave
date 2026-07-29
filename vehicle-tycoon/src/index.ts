@@ -23,11 +23,8 @@ export { OrderSystem } from './systems/OrderSystem';
 export { FactorySystem } from './systems/FactorySystem';
 export { TechSystem } from './systems/TechSystem';
 export { EconomySystem } from './systems/EconomySystem';
-export { IntimacySystem } from './systems/IntimacySystem';
 export { AchievementSystem } from './systems/AchievementSystem';
 export { EventSystem } from './systems/EventSystem';
-export { ChallengeSystem } from './systems/ChallengeSystem';
-export { PrestigeSystem } from './systems/PrestigeSystem';
 
 // 为了便捷创建而内部引用
 import { SaveManager as SM } from './core/SaveManager';
@@ -55,8 +52,6 @@ export function loadGame(): GL | null {
   state.techTree = saveData.techTree;
   state.achievements = saveData.achievements;
   state.stats = saveData.stats;
-  state.prestige = saveData.prestige;
-  state.challenge = saveData.challenge;
   state.settings = saveData.settings;
 
   const gameLoop = new GL(state);

@@ -30,7 +30,7 @@
       --gold-strong: #a8761a;     /* 深芥末（纸面上可读的金色文字） */
       --gold-deep: #c98f2b;
       --gold-ink: #3d2b07;        /* 金底上的深色文字 */
-      --blue: #4a7dab;            /* 零件/精良 */
+      --blue: #4a7dab;            /* 零件/标准型 */
       --green: #5a9e4f;           /* 空闲/完成 */
       --orange: #d97b3f;          /* 在途/暴击 */
       --red: #d34f42;             /* 警告 */
@@ -461,31 +461,6 @@
     }
     .enroute-card-choice-summary { font-size: 10px; font-weight: 700; opacity: 0.92; }
 
-    /* 命名弹窗：输入框 + 备选名胶囊 */
-    .modal input[type="text"] {
-      width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 15px; font-weight: 700;
-      background: var(--bg-0); color: var(--gold-strong);
-      border: 2px solid var(--line); border-radius: var(--r-m);
-      outline: none; text-align: center; margin-bottom: 12px;
-      transition: border-color 0.15s, box-shadow 0.15s;
-    }
-    .modal input[type="text"]:focus {
-      border-color: var(--teal);
-      box-shadow: 3px 3px 0 rgba(55,145,139,0.3);
-    }
-    .modal .name-chips {
-      display: flex; gap: 6px; justify-content: center; flex-wrap: wrap;
-      margin-bottom: 14px;
-    }
-    .modal .name-chips button {
-      padding: 4px 12px; font-size: 12px; font-weight: 700;
-      background: var(--bg-3); color: var(--text-1);
-      border: 1.5px solid var(--line); border-radius: 999px; cursor: pointer;
-      transition: background 0.15s, color 0.15s, transform 0.12s;
-      touch-action: manipulation;
-    }
-    .modal .name-chips button:hover { background: var(--gold); color: var(--gold-ink); transform: translate(-1px,-1px); }
-
     .badge { display: inline-block; font-size: 9px; padding: 1px 6px; border-radius: 999px; margin-left: 3px; border: 1.5px solid; }
     .badge.rare { background: #efe4f8; color: var(--purple); border-color: var(--purple); }
 
@@ -634,9 +609,8 @@
     <div id="topbar">
       <span class="resource"><span class="icon">🪙</span><span class="value" id="gold">0</span></span>
       <span class="resource"><span class="icon">⚙️</span><span class="value parts" id="parts">0</span></span>
-      <span class="resource" title="能源：电站产出，造车/升品/进化/派单都要用电"><span class="icon">⚡</span><span class="value energy" id="energy">0/0</span></span>
+      <span class="resource" title="能源：电站产出，造车/升级规格/派单都要用电"><span class="icon">⚡</span><span class="value energy" id="energy">0/0</span></span>
       <span class="resource" title="声望：企业品牌口碑，高阶车型的市场准入"><span class="icon">📈</span><span class="value rep" id="reputation">0</span></span>
-      <span class="resource"><span class="icon">💖</span><span id="intimacy-sum">0</span></span>
       <span id="eps">0/s</span>
       <span id="tier-label">🛴 T1</span>
       <span id="vehicle-status-icons" style="display:flex;gap:4px;align-items:center;"></span>
@@ -733,7 +707,7 @@
       <div class="section-title" style="margin-top:12px;">🔋 电站改造</div>
       <div id="power-retrofits"></div>
       <p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px;">
-        💡 造车、升品质、进化、派单都要用电。动力跟不上时，订单会陷入「动力不足」——耗时 +50%，别让车队断电。
+        💡 造车、升级规格、派单都要用电。动力跟不上时，订单会陷入「动力不足」——耗时 +50%，别让车队断电。
       </p>
     </div>
 

@@ -1,5 +1,5 @@
 // ============================================================
-// 性格特质配置表
+// 出厂参数配置表（原性格特质，S0 语义换皮：机制不变，只改展示名）
 // ============================================================
 
 import { TraitType, TraitRarity, TraitConfigEntry } from '../core/types';
@@ -7,7 +7,7 @@ import { TraitType, TraitRarity, TraitConfigEntry } from '../core/types';
 export const TRAIT_CONFIGS: TraitConfigEntry[] = [
   {
     type: TraitType.Quick,
-    name: '勤快',
+    name: '高速',
     rarity: TraitRarity.Normal,
     effectType: 'speed',
     effectValue: 0.85,     // 耗时 ×0.85
@@ -15,7 +15,7 @@ export const TRAIT_CONFIGS: TraitConfigEntry[] = [
   },
   {
     type: TraitType.Strong,
-    name: '强壮',
+    name: '重载',
     rarity: TraitRarity.Normal,
     effectType: 'cargo',
     effectValue: 1.20,     // 收入 ×1.20
@@ -31,7 +31,7 @@ export const TRAIT_CONFIGS: TraitConfigEntry[] = [
   },
   {
     type: TraitType.Smart,
-    name: '聪明',
+    name: '老练',
     rarity: TraitRarity.Normal,
     effectType: 'exp',
     effectValue: 1.20,     // 经验 ×1.20
@@ -39,7 +39,7 @@ export const TRAIT_CONFIGS: TraitConfigEntry[] = [
   },
   {
     type: TraitType.Wealth,
-    name: '招财',
+    name: '节能',
     rarity: TraitRarity.Normal,
     effectType: 'income',
     effectValue: 1.10,     // 收入 ×1.10
@@ -56,7 +56,7 @@ export const TRAIT_CONFIGS: TraitConfigEntry[] = [
 ];
 
 /**
- * 根据概率表随机抽取一个特质
+ * 根据概率表随机抽取一个出厂参数
  */
 export function rollTrait(): TraitType {
   const rand = Math.random();
@@ -75,7 +75,7 @@ export function rollTrait(): TraitType {
 }
 
 /**
- * 获取特质配置
+ * 获取出厂参数配置
  */
 export function getTraitConfig(type: TraitType): TraitConfigEntry | undefined {
   return TRAIT_CONFIGS.find(t => t.type === type);

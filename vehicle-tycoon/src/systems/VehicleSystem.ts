@@ -1,11 +1,11 @@
 // ============================================================
-// 车辆系统 — 创建、升级、进化、退役
+// 车辆系统 — 创建、升级、退役
 // ============================================================
 
 import { EventBus } from '../core/EventBus';
 import {
   GameEvent, GameState, Vehicle, VehicleStats, BuildJob,
-  Quality, QUALITY_ORDER, qualityRank, VehicleStatus, TraitType, TalentType, Order,
+  Quality, QUALITY_ORDER, qualityRank, VehicleStatus, TraitType, Order,
   Specialization
 } from '../core/types';
 import { getVehicleConfig, getUnmetRequirements } from '../config/VehicleConfig';
@@ -43,7 +43,7 @@ export class VehicleSystem {
     this.state = state;
     this.vehicleIdCounter = state.garage.vehicles.length;
 
-    // 订单完成 → 统一走 addExp() 发放经验（含特质/品质加成与升级判定）
+    // 订单完成 → 统一走 addExp() 发放经验（含出厂参数/规格加成与升级判定）
     EventBus.on(GameEvent.ORDER_COMPLETED, (...args: unknown[]) => {
       const order = args[0] as Order;
       const vehicle = args[1] as Vehicle | undefined;
@@ -108,22 +108,22 @@ export class VehicleSystem {
     return job;
   }
 
-  /** 建造落地：特质随机、传承池继承、产量计数，与原即时造车路径一致 */
+  /** 建造落地：出厂参数随机、传承池继承、产量计数，与原即时造车路径一致 */
   private produceVehicle(tier: number): Vehicle {
     const config = getVehicleConfig(tier)!;
     const trait = rollTrait();
+    // 车辆名称落地自动生成：车型名 + #编号（编号 = 该 tier 历史产出序号，保证不重复）
+    const seq = this.state.techTree.producedCount[tier - 1] + 1;
 
     const vehicle: Vehicle = {
       id: `v_${Date.now()}_${this.vehicleIdCounter++}`,
       tier,
-      name: config.name,
+      name: `${config.name} #${seq}`,
       level: 1,
       exp: 0,
       quality: Quality.White,
       trait,
-      intimacy: 0,
       stats: { speed: 0, cargo: 0, durability: 0 },
-      isEvolved: false,
       specialization: null,
       wear: 0,
       consecutiveOrders: 0,
@@ -147,13 +147,13 @@ export class VehicleSystem {
     }
     this.state.techTree.producedCount[tier - 1]++;
 
-    // 传承池：拆解旧车沉淀的经验，新车落地一次性继承（原始经验，不吃特质/品质加成）
+    // 传承池：拆解旧车沉淀的经验，新车落地一次性继承（原始经验，不吃出厂参数/规格加成）
     const pool = this.state.garage.inheritanceExp;
     if (pool > 0) {
       this.state.garage.inheritanceExp = 0;
       this.state.stats.totalVehiclesInherited++;
       vehicle.exp += pool;
-      while (vehicle.level < this.getMaxLevel(vehicle.quality, vehicle.isEvolved)) {
+      while (vehicle.level < this.getMaxLevel(vehicle.quality)) {
         const needed = expForLevel(vehicle.level);
         if (vehicle.exp >= needed) {
           vehicle.exp -= needed;
@@ -180,14 +180,6 @@ export class VehicleSystem {
     }
   }
 
-  nameVehicle(vehicleId: string, name: string): boolean {
-    const vehicle = this.getVehicle(vehicleId);
-    if (!vehicle) return false;
-    vehicle.name = name;
-    EventBus.emit(GameEvent.VEHICLE_NAMED, vehicle);
-    return true;
-  }
-
   // ==================== 等级 ====================
 
   addExp(vehicleId: string, exp: number): boolean {
@@ -199,7 +191,7 @@ export class VehicleSystem {
       exp = Math.floor(exp * traitConfig.effectValue);
     }
 
-    // 稳健专精：经验 ×1.15
+    // 耐用运营配置：经验 ×1.15
     if (vehicle.specialization === 'steady') {
       exp = Math.floor(exp * GAME_CONSTANTS.SPEC_STEADY_EXP_MULT);
     }
@@ -213,7 +205,7 @@ export class VehicleSystem {
 
     vehicle.exp += exp;
 
-    while (vehicle.level < this.getMaxLevel(vehicle.quality, vehicle.isEvolved)) {
+    while (vehicle.level < this.getMaxLevel(vehicle.quality)) {
       const needed = expForLevel(vehicle.level);
       if (vehicle.exp >= needed) {
         vehicle.exp -= needed;
@@ -227,12 +219,12 @@ export class VehicleSystem {
     return true;
   }
 
-  // ==================== 品质（M7：耗时化 + 锁车） ====================
+  // ==================== 规格（M7：耗时化 + 锁车） ====================
 
   /**
-   * 开始品质升级：白→蓝 60s、蓝→金 180s。
+   * 开始升级规格：白→蓝 60s、蓝→金 180s。
    * 资源在开始升级时扣除（防刷）；期间车辆 status = Maintenance（不可接单/指派），
-   * 到点后由 tick 应用品质并恢复 Idle。
+   * 到点后由 tick 应用规格并恢复 Idle。
    */
   upgradeQuality(vehicleId: string): boolean {
     const vehicle = this.getVehicle(vehicleId);
@@ -277,7 +269,7 @@ export class VehicleSystem {
     return true;
   }
 
-  /** 到点结算品质升级：应用目标品质、恢复空闲、发事件 */
+  /** 到点结算规格升级：应用目标规格、恢复空闲、发事件 */
   private settleQualityUpgrade(vehicle: Vehicle): void {
     const job = vehicle.qualityUpgrade;
     if (!job) return;
@@ -287,10 +279,10 @@ export class VehicleSystem {
     EventBus.emit(GameEvent.QUALITY_UPGRADED, vehicle);
   }
 
-  // ==================== 专精 ====================
+  // ==================== 运营配置 ====================
 
   /**
-   * 选择专精（蓝品质解锁，三选一，永久不可更改）
+   * 选择运营配置（蓝规格解锁，三选一，永久不可更改）
    */
   specialize(vehicleId: string, spec: Specialization): boolean {
     const vehicle = this.getVehicle(vehicleId);
@@ -319,30 +311,36 @@ export class VehicleSystem {
     return true;
   }
 
-  // ==================== 进化 ====================
+  // ==================== 检修 ====================
 
-  evolve(vehicleId: string): boolean {
+  private lastOverhaulTime: Record<string, number> = {};
+
+  /**
+   * 检修车辆（消耗零件）：只清磨损，无其他养成效果
+   */
+  overhaul(vehicleId: string): boolean {
+    const now = Date.now();
+    const last = this.lastOverhaulTime[vehicleId] ?? 0;
+    if (now - last < GAME_CONSTANTS.OVERHAUL_COOLDOWN * 1000) return false;
+
     const vehicle = this.getVehicle(vehicleId);
     if (!vehicle) return false;
-    if (vehicle.isEvolved) return false;
-    if (vehicle.quality !== Quality.Gold) return false;
-    if (vehicle.level < GAME_CONSTANTS.MAX_VEHICLE_LEVEL) return false;
-    if (vehicle.intimacy < GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT) return false;
-    if (this.state.resources.energy < GAME_CONSTANTS.ENERGY_EVOLVE) return false; // M8 耗电
 
-    this.state.resources.energy -= GAME_CONSTANTS.ENERGY_EVOLVE;
+    const partsCost = GAME_CONSTANTS.OVERHAUL_PARTS_COST;
+    if (this.state.resources.parts < partsCost) return false;
 
-    // 进化效果：
-    // 1. 等级上限 +5（getMaxLevel 对进化车生效）
-    // 2. 收入 ×3（EconomySystem.calculateOrderIncome 按 isEvolved 加成）
-    // 3. 车型专属天赋生效（收入/耗时/零件/刷新等，见 EconomySystem / OrderSystem）
-    // 4. 品牌声望 +100（M8）
-    vehicle.isEvolved = true;
-    this.state.stats.totalEvolutions++;
-    this.state.resources.reputation += GAME_CONSTANTS.REP_EVOLVE;
+    this.state.resources.parts -= partsCost;
+    this.lastOverhaulTime[vehicleId] = now;
+    vehicle.wear = 0; // 检修修复磨损
 
-    EventBus.emit(GameEvent.VEHICLE_EVOLVED, vehicle);
+    EventBus.emit(GameEvent.VEHICLE_STATS_CHANGED, vehicle);
     return true;
+  }
+
+  /** 检修冷却剩余秒数（UI 用） */
+  getOverhaulCooldownRemaining(vehicleId: string): number {
+    const last = this.lastOverhaulTime[vehicleId] ?? 0;
+    return Math.max(0, GAME_CONSTANTS.OVERHAUL_COOLDOWN - Math.floor((Date.now() - last) / 1000));
   }
 
   // ==================== 退役 ====================
@@ -459,6 +457,7 @@ export class VehicleSystem {
 
     this.scrapVehicle(oldVehicleId);   // 1) 拆解旧车：返还口径与直接拆解一致
     this.createVehicle(newTier);       // 2) 新车入队：预校验通过，必然成功
+    this.state.stats.totalTradeIns++;
     return { ok: true };
   }
 
@@ -473,7 +472,7 @@ export class VehicleSystem {
         v.status = VehicleStatus.Idle;
         v.statusEndAt = 0;
       }
-      // 品质升级到点结算
+      // 规格升级到点结算
       if (v.qualityUpgrade && Date.now() >= v.qualityUpgrade.finishAt) {
         this.settleQualityUpgrade(v);
       }
@@ -486,22 +485,12 @@ export class VehicleSystem {
     return this.state.garage.vehicles.find(v => v.id === vehicleId);
   }
 
-  getMaxLevel(quality: Quality, isEvolved = false): number {
-    let base: number;
+  getMaxLevel(quality: Quality): number {
     switch (quality) {
-      case Quality.White: base = GAME_CONSTANTS.QUALITY_WHITE_MAX_LEVEL; break;
-      case Quality.Blue: base = GAME_CONSTANTS.QUALITY_BLUE_MAX_LEVEL; break;
-      case Quality.Gold: base = GAME_CONSTANTS.QUALITY_GOLD_MAX_LEVEL; break;
+      case Quality.White: return GAME_CONSTANTS.QUALITY_WHITE_MAX_LEVEL;
+      case Quality.Blue: return GAME_CONSTANTS.QUALITY_BLUE_MAX_LEVEL;
+      case Quality.Gold: return GAME_CONSTANTS.QUALITY_GOLD_MAX_LEVEL;
     }
-    return isEvolved ? base + GAME_CONSTANTS.EVOLVED_LEVEL_BONUS : base;
-  }
-
-  getTalentType(tier: number): TalentType | undefined {
-    return getVehicleConfig(tier)?.talentType;
-  }
-
-  getEvolvedName(tier: number): string | undefined {
-    return getVehicleConfig(tier)?.evolvedName;
   }
 
   private removeFromGarage(vehicleId: string): void {

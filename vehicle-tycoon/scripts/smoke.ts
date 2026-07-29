@@ -2,17 +2,16 @@
 import { SaveManager } from '../src/core/SaveManager';
 import { VehicleSystem } from '../src/systems/VehicleSystem';
 import { OrderSystem } from '../src/systems/OrderSystem';
-import { EconomySystem, getGlobalIncomeMult, getTalentIncomeMult } from '../src/systems/EconomySystem';
+import { EconomySystem, getGlobalIncomeMult } from '../src/systems/EconomySystem';
 import { EventSystem, getEventMultiplier } from '../src/systems/EventSystem';
 import { AchievementSystem } from '../src/systems/AchievementSystem';
-import { Quality, OrderType, TalentType, TraitType, VehicleStatus, OrderStatus, Specialization } from '../src/core/types';
+import { Quality, OrderType, TraitType, VehicleStatus, OrderStatus, Specialization } from '../src/core/types';
 import { GAME_CONSTANTS, cumulativeExpForLevel } from '../src/config/GameConstants';
 import { getVehicleConfig, getUnmetRequirements } from '../src/config/VehicleConfig';
 import { FactorySystem, getBuildQueueMax } from '../src/systems/FactorySystem';
 import { TechSystem, getEffectivePartsCost, getSideTechRank } from '../src/systems/TechSystem';
 import { getUpgradeMult, getSubTechRank, getRetrofitLevel } from '../src/systems/UpgradeSystem';
 import type { UpgradeEffectKey } from '../src/core/types';
-import { IntimacySystem } from '../src/systems/IntimacySystem';
 import { getEnRouteEventConfig } from '../src/config/EnRouteEventConfig';
 import { computeHint } from '../src/ui/hint';
 
@@ -32,27 +31,21 @@ new AchievementSystem(state);
 // 造一辆车（T1 独轮车 5🪙）
 const v = vehicleSys.createVehicle(1)!;
 check('造车成功', !!v);
-v.trait = null; // 排除特质随机性
+v.trait = null; // 排除出厂参数随机性
 
 const globalMult = getGlobalIncomeMult(state);
 const base = EconomySystem.calculateOrderIncome(v, 100, 1.0, globalMult, false, state, OrderType.Normal).income;
 
-// 1. 进化 ×3
-v.isEvolved = true;
-const evolved = EconomySystem.calculateOrderIncome(v, 100, 1.0, globalMult, false, state, OrderType.Normal).income;
-check('进化收入 ×3', evolved === Math.floor(base * 3 * GAME_CONSTANTS.TALENT_AGILE_DURATION_MULT) || evolved === base * 3, `base=${base} evolved=${evolved}`);
-v.isEvolved = false;
-
-// 2. 载货属性 +4%/级
+// 1. 载货属性 +4%/级
 v.stats.cargo = 5;
 const withCargo = EconomySystem.calculateOrderIncome(v, 100, 1.0, globalMult, false, state, OrderType.Normal).income;
 check('载货 5 级收入 +20%', withCargo === Math.floor(base * 1.2), `withCargo=${withCargo}`);
 v.stats.cargo = 0;
 
-// 3. 强壮特质 ×1.2
+// 3. 重载出厂参数 ×1.2
 v.trait = TraitType.Strong;
 const strong = EconomySystem.calculateOrderIncome(v, 100, 1.0, globalMult, false, state, OrderType.Normal).income;
-check('强壮特质收入 ×1.2', strong === Math.floor(base * 1.2), `strong=${strong}`);
+check('重载出厂参数收入 ×1.2', strong === Math.floor(base * 1.2), `strong=${strong}`);
 v.trait = null;
 
 // 4. 牛市事件 ×1.5
@@ -61,30 +54,15 @@ const bull = EconomySystem.calculateOrderIncome(v, 100, 1.0, globalMult, false, 
 check('牛市收入 ×1.5', Math.abs(bull - base * 1.5) <= 2, `bull=${bull} base=${base}`);
 state.activeEvents.length = 0;
 
-// 5. T5 卡车天赋 ×1.5（普通单）
+// 5. 测试资源准备：批量造车/派单耗电充满，绕过声望/科技/工厂门槛
 state.resources.gold = 10_000_000;
 state.resources.parts = 1_000_000;
 state.resources.energy = 1_000_000;     // M8：批量造车/派单耗电，测试充满
 state.resources.reputation = 100_000;   // M8/M9：绕过声望门槛
 state.techTree.currentLevel = 2;        // M9：T4/T5 需科技 L2
 state.factory.level = 3;                // M9：T5 需工厂 L3
-const truck = vehicleSys.createVehicle(5)!;
-truck.trait = null; truck.isEvolved = true;
-const truckIncome = EconomySystem.calculateOrderIncome(truck, 100, 1.0, globalMult, false, state, OrderType.Normal).income;
-const truckBase = EconomySystem.calculateOrderIncome({ ...truck, isEvolved: false }, 100, 1.0, globalMult, false, state, OrderType.Normal).income;
-check('卡车天赋 ×1.5 + 进化 ×3', Math.abs(truckIncome - truckBase * 4.5) <= 5, `truck=${truckIncome} expect≈${truckBase * 4.5}`);
-truck.isEvolved = false;
 
-// 6. T4 小汽车天赋：普通单 ×2，长途单不加
-const car = vehicleSys.createVehicle(4)!;
-car.trait = null; car.isEvolved = true;
-const carNormal = getTalentIncomeMult(car, state, OrderType.Normal);
-const carLong = getTalentIncomeMult(car, state, OrderType.LongDistance);
-check('小汽车普通单天赋 ×2', carNormal === 2.0, `carNormal=${carNormal}`);
-check('小汽车长途单天赋 ×1', carLong === 1.0, `carLong=${carLong}`);
-car.isEvolved = false;
-
-// 7. 勤快特质：接单耗时 ×0.85
+// 7. 高速出厂参数：接单耗时 ×0.85
 state.orders.push({
   id: 'o_test', type: OrderType.Normal, tier: 1, baseReward: 10, expReward: 20, duration: 30,
   assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
@@ -92,7 +70,7 @@ state.orders.push({
 v.trait = TraitType.Quick;
 orderSys.assignVehicle('o_test', v.id);
 const durMs = v.statusEndAt - Date.now();
-check('勤快车耗时 ≈25.5s', durMs > 24000 && durMs < 26000, `dur=${durMs}ms`);
+check('高速车耗时 ≈25.5s', durMs > 24000 && durMs < 26000, `dur=${durMs}ms`);
 v.trait = null;
 // 直接结算该订单
 orderSys.completeOrder('o_test');
@@ -120,9 +98,9 @@ achSys.tick();
 const allRounder = state.achievements.find(a => a.id === 'all_rounder')!;
 check('五维全能成就解锁', allRounder.isUnlocked);
 
-// 11. 成就：rainbow_team 只数传说车
-const rainbow = state.achievements.find(a => a.id === 'rainbow_team')!;
-check('彩虹战队未误解锁', !rainbow.isUnlocked);
+// 11. 成就：更新换代（以旧换新计数）存在且未误解锁
+const tradeinAch = state.achievements.find(a => a.id === 'tradein_master')!;
+check('更新换代成就未误解锁', !!tradeinAch && !tradeinAch.isUnlocked);
 
 // 12. 经验数值：首单 20 经验
 check('普通单经验 = 20', GAME_CONSTANTS.ORDER_NORMAL_EXP_BASE === 20);
@@ -133,16 +111,16 @@ const highOrder: import('../src/core/types').Order = {
   requiredQuality: Quality.Blue,
   assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
 };
-v.quality = Quality.Blue; // T1 蓝品质独轮车
-check('T1 蓝品质车不能接 T8 贵重单', !orderSys.canVehicleTakeOrder(v.id, highOrder));
+v.quality = Quality.Blue; // T1 蓝规格独轮车
+check('T1 蓝规格车不能接 T8 贵重单', !orderSys.canVehicleTakeOrder(v.id, highOrder));
 state.techTree.currentLevel = 4;  // M9：T8 需科技 L4
 state.factory.powerLevel = 4;     // M9：T8 需电站 L4
 const plane = vehicleSys.createVehicle(8)!;
 plane.trait = null; plane.quality = Quality.Blue;
-check('T8 蓝品质车可以接 T8 贵重单', orderSys.canVehicleTakeOrder(plane.id, highOrder));
+check('T8 蓝规格车可以接 T8 贵重单', orderSys.canVehicleTakeOrder(plane.id, highOrder));
 check('高 tier 车可以接低 tier 单', orderSys.canVehicleTakeOrder(plane.id, { ...highOrder, tier: 1 }));
 
-// 14-16. 磨损/疲劳/专精（比值断言，对车辆等级/品质漂移免疫）
+// 14-16. 磨损/疲劳/运营配置（比值断言，对车辆等级/规格漂移免疫）
 const calcIncome = () => EconomySystem.calculateOrderIncome(
   v, 100, 1.0, globalMult, false, state, OrderType.Normal
 ).income;
@@ -163,9 +141,9 @@ v.specialization = Specialization.Heavy;
 const heavy = calcIncome();
 v.specialization = null;
 const refSpec = calcIncome();
-check('重载专精收入 ×1.25', Math.abs(heavy / refSpec - 1.25) < 0.03, `heavy=${heavy} ref=${refSpec}`);
+check('重载运营配置收入 ×1.25', Math.abs(heavy / refSpec - 1.25) < 0.03, `heavy=${heavy} ref=${refSpec}`);
 
-// 17. 快车专精：耗时 ×0.75（比值）
+// 17. 快运运营配置：耗时 ×0.75（比值）
 const measureDuration = (): number => {
   const id = `o_dur_${Date.now()}_${Math.random()}`;
   state.orders.push({
@@ -182,22 +160,21 @@ v.specialization = Specialization.Express;
 const expressDur = measureDuration();
 v.specialization = null;
 const normalDur = measureDuration();
-check('快车专精耗时 ×0.75', Math.abs(expressDur / normalDur - 0.75) < 0.05, `express=${expressDur}ms normal=${normalDur}ms`);
+check('快运运营配置耗时 ×0.75', Math.abs(expressDur / normalDur - 0.75) < 0.05, `express=${expressDur}ms normal=${normalDur}ms`);
 
 // 18. 完成订单累积磨损与连单
 check('完成订单后磨损累积', v.wear >= GAME_CONSTANTS.WEAR_PER_ORDER, `wear=${v.wear}`);
 check('完成订单后连单计数', v.consecutiveOrders >= 1, `consec=${v.consecutiveOrders}`);
 
-// 19. 保养清零磨损
-const intimacySys = new IntimacySystem(state);
+// 19. 检修清零磨损（只清磨损，无其他养成效果）
 state.resources.parts = 100;
-check('保养成功', intimacySys.repair(v.id));
-check('保养后磨损清零', v.wear === 0, `wear=${v.wear}`);
+check('检修成功', vehicleSys.overhaul(v.id));
+check('检修后磨损清零', v.wear === 0, `wear=${v.wear}`);
 
-// 20. 专精只能选一次（需蓝品质）
+// 20. 运营配置只能选一次（需蓝规格）
 v.quality = Quality.Blue;
-check('首次专精成功', vehicleSys.specialize(v.id, Specialization.Steady));
-check('专精不可更改', !vehicleSys.specialize(v.id, Specialization.Express));
+check('首次运营配置成功', vehicleSys.specialize(v.id, Specialization.Steady));
+check('运营配置不可更改', !vehicleSys.specialize(v.id, Specialization.Express));
 v.quality = Quality.White;
 v.specialization = null;
 
@@ -305,12 +282,12 @@ orderSys.resolveEnRouteEvent('o_er_weather', 0);
 const remainAfter = v.statusEndAt - nowBeforeWeather;
 check('赶路剩余耗时 ×0.85', Math.abs(remainAfter / remainBefore - 0.85) < 0.02,
   `before=${remainBefore}ms after=${remainAfter}ms`);
-// 「慢行」：亲密度 +5（另起一单）
+// 「慢行」：本单零件 +2（另起一单）
 orderSys.completeOrder('o_er_weather');
-v.intimacy = 50;
+const partsBeforeSlow = state.resources.parts;
 const oSlow = assignWithEvent('o_er_slow', 'good_weather');
 orderSys.resolveEnRouteEvent('o_er_slow', 1);
-check('慢行亲密度 +5', v.intimacy === 55, `intimacy=${v.intimacy}`);
+check('慢行零件 +2', state.resources.parts - partsBeforeSlow === 2, `delta=${state.resources.parts - partsBeforeSlow}`);
 orderSys.completeOrder('o_er_slow');
 
 // 25c. 爆胎「硬开」：磨损 +15；「换胎」零件不足不可选
@@ -420,19 +397,13 @@ hs.techTree.producedCount[2] = 5; // L2 解锁条件：产 5 辆 T3 马车
 const hTech = computeHint(hs, hsTech.getNextResearchable())!;
 check('科技可研究优先提示', hTech.action.type === 'tab' && hTech.action.tab === 'tech', JSON.stringify(hTech));
 
-// 26c. 科技不可研究时：金品质满级+亲密度≥80 → 进化提示（指向车辆详情）
+// 26c. 科技不可研究 + 车库有空间 + 已选运营配置时：主力车磨损 ≥70 → 检修提示
 hs.techTree.producedCount[2] = 0;
 const hv = hsVehicleSys.createVehicle(1)!;
 hv.trait = null;
 hv.quality = Quality.Gold;
 hv.level = GAME_CONSTANTS.MAX_VEHICLE_LEVEL;
-hv.intimacy = GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT;
-const hEvo = computeHint(hs, hsTech.getNextResearchable())!;
-check('可进化车辆提示', hEvo.action.type === 'vehicle' && hEvo.action.vehicleId === hv.id, JSON.stringify(hEvo));
-
-// 26d. 主力车磨损 ≥70 → 保养提示
-hv.isEvolved = true; // 摘掉进化提示
-hv.specialization = Specialization.Steady; // 摘掉专精提示（规则 4 优先于磨损）
+hv.specialization = Specialization.Steady; // 摘掉运营配置提示（规则 3 优先于磨损）
 hv.wear = 75;
 const hWear = computeHint(hs, hsTech.getNextResearchable())!;
 check('主力车磨损提示', hWear.action.type === 'vehicle' && hWear.text.includes('磨损'), JSON.stringify(hWear));
@@ -486,14 +457,14 @@ const lockOrder: import('../src/core/types').Order = {
   assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
 };
 qs.orders.push(lockOrder);
-check('开始品质升级', qVehicleSys.upgradeQuality(lockV.id));
+check('开始升级规格', qVehicleSys.upgradeQuality(lockV.id));
 check('升级期间锁定 Maintenance', lockV.status === VehicleStatus.Maintenance);
 check('升级期间不可接单', !qOrderSys.canVehicleTakeOrder(lockV.id, lockOrder));
 check('升级期间派单被拒', !qOrderSys.assignVehicle('o_lock', lockV.id));
 check('升级期间不能重复升级', !qVehicleSys.upgradeQuality(lockV.id));
 lockV.qualityUpgrade!.finishAt = Date.now() - 1; // 拨到到点
 qVehicleSys.tick(1);
-check('升级到点应用品质并恢复空闲',
+check('升级到点应用规格并恢复空闲',
   lockV.quality === Quality.Blue && lockV.status === VehicleStatus.Idle && lockV.qualityUpgrade === null);
 check('升级完成后可接单', qOrderSys.canVehicleTakeOrder(lockV.id, lockOrder));
 
@@ -662,22 +633,7 @@ es.activeEvents.length = 0; // 手动结束冷却
 check('冷却结束可再营销', eOrder.runMarketing());
 es.activeEvents.length = 0;
 
-// 28g. 进化：耗 200⚡，声望 +100
-const evo = eVehicle.createVehicle(1)!;
-evo.trait = null;
-evo.quality = Quality.Gold;
-evo.level = GAME_CONSTANTS.MAX_VEHICLE_LEVEL;
-evo.intimacy = GAME_CONSTANTS.INTIMACY_EVOLVE_REQUIREMENT;
-es.resources.energy = GAME_CONSTANTS.ENERGY_EVOLVE - 1;
-check('能源不足进化被拒', !eVehicle.evolve(evo.id));
-es.resources.energy = GAME_CONSTANTS.ENERGY_EVOLVE;
-const repBeforeEvo = es.resources.reputation;
-check('进化成功', eVehicle.evolve(evo.id));
-check('进化耗 200⚡', es.resources.energy === 0);
-check('进化声望 +100', es.resources.reputation - repBeforeEvo === GAME_CONSTANTS.REP_EVOLVE,
-  `delta=${es.resources.reputation - repBeforeEvo}`);
-
-// 28h. 品质升级耗电：白→蓝 20⚡ / 蓝→金 80⚡
+// 28g. 升级规格耗电：经济型→标准型 20⚡ / 标准型→工业型 80⚡
 const qs2 = SaveManager.createInitialState();
 const q2Vehicle = new VehicleSystem(qs2);
 q2Vehicle.debugInstantBuild = true;
@@ -958,7 +914,7 @@ const mkTradeState = () => {
   const vs = new VehicleSystem(st);
   vs.debugInstantBuild = true;
   const old = vs.createVehicle(1)!; // T1：-10🪙 -5⚡
-  old.trait = null;                 // 排除特质传承随机性
+  old.trait = null;                 // 排除出厂参数传承随机性
   vs.addExp(old.id, 50);            // 带点经验，验证传承池口径
   return { st, vs, old };
 };
