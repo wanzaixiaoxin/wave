@@ -231,6 +231,14 @@
       background: #faecd0; color: var(--gold-strong); border-color: var(--gold-deep);
     }
 
+    /* 车型 tier 角标（卡片左上角）：一眼看清这是第几代车 */
+    .tier-badge {
+      position: absolute; top: 5px; left: 5px;
+      padding: 1px 7px; border-radius: 999px;
+      font-size: 9px; font-weight: 800; line-height: 1.7; letter-spacing: 0.5px;
+      background: #e2f0ee; color: var(--teal); border: 1.5px solid var(--teal);
+    }
+
     .status-badge {
       display: inline-block; padding: 2px 9px; border-radius: 999px;
       font-size: 10px; font-weight: 800; margin-top: 4px;
@@ -399,6 +407,11 @@
     .modal .btn-row button:active { transform: translate(2px,2px); box-shadow: 1px 1px 0 rgba(51,48,42,0.9); }
     .modal .btn-row button:last-child {
       background: var(--bg-0); color: var(--text-2);
+    }
+    /* 禁用态（如置换金币不足/队列满）：灰色不可点 */
+    .modal .btn-row button:disabled {
+      background: var(--bg-3); color: var(--text-3); cursor: not-allowed;
+      border-color: var(--line-soft); box-shadow: none; transform: none;
     }
 
     /* 路上事件浮动卡片（M1）：非模态，固定右下角，无遮罩不抢焦点 */
@@ -674,7 +687,7 @@
 
     <!-- 面板 -->
     <div class="panel" id="panel-factory">
-      <div class="section-title">🏭 零件工厂 Lv.<span id="factory-level">1</span></div>
+      <div class="section-title">🏭 零件工厂 Lv.<span id="factory-level">1</span>/<span id="factory-level-max">10</span> <span class="rank-pips" id="factory-pips"></span></div>
       <div id="factory-info" style="padding:8px 0;">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg-0);border:1.5px solid var(--line-soft);border-radius:8px;margin-bottom:6px;">
           <span>⚙️ 产出速率</span>
@@ -700,7 +713,7 @@
       </p>
 
       <!-- 电站（M8）：企业的动力源，时代名称随科技等级演进 -->
-      <div class="section-title" style="margin-top:14px;">⚡ <span id="power-name">燃煤锅炉</span> Lv.<span id="power-level">1</span></div>
+      <div class="section-title" style="margin-top:14px;">⚡ <span id="power-name">燃煤锅炉</span> Lv.<span id="power-level">1</span>/<span id="power-level-max">10</span> <span class="rank-pips" id="power-pips"></span></div>
       <div style="padding:8px 0;">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg-0);border:1.5px solid var(--line-soft);border-radius:8px;margin-bottom:6px;">
           <span>⚡ 产出速率</span>
@@ -726,6 +739,7 @@
 
     <div class="panel" id="panel-tech">
       <div class="section-title">🔬 科技树</div>
+      <div id="tech-summary" style="padding:4px 2px 8px;font-size:12px;color:var(--text-2);font-weight:700;"></div>
       <div class="tech-tree" id="tech-tree"></div>
       <div class="section-title" style="margin-top:10px;">🧪 辅助科技</div>
       <div class="tech-tree" id="side-tech-tree"></div>

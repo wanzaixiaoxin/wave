@@ -18,6 +18,20 @@ import { getSideTechRank, getEffectivePartsCost } from './TechSystem';
 import { getUpgradeMult } from './UpgradeSystem';
 import { getBuildQueueMax } from './FactorySystem';
 
+/** 置换报价：UI 清单与 tradeIn 校验共用同一套数值口径 */
+export interface TradeInQuote {
+  ok: boolean;
+  reason?: string;
+  scrapParts: number;    // 旧车回收零件（拆解口径 60%）
+  scrapGold: number;     // 旧车回收金币（拆解口径 30%+回收工艺）
+  inheritedExp: number;  // 沉淀进传承池的经验
+  buildGold: number;     // 新车金币成本（createVehicle 扣费口径）
+  buildParts: number;    // 新车零件成本
+  buildEnergy: number;   // 新车能源成本
+  buildTime: number;     // 新车建造耗时（秒）
+  goldDiff: number;      // 实际需补金币（buildGold - scrapGold，负数=倒找）
+}
+
 export class VehicleSystem {
   private state: GameState;
   private vehicleIdCounter = 0;
@@ -343,24 +357,32 @@ export class VehicleSystem {
     return true;
   }
 
-  scrapVehicle(vehicleId: string): { parts: number; inheritedTrait: TraitType | null; inheritedExp: number } {
+  /** 拆解返还预览：零件 60% + 金币 30%+回收工艺 + 传承经验（scrapVehicle / tradeIn / 置换弹窗共用口径，单一数据源） */
+  getScrapPreview(vehicleId: string): { parts: number; gold: number; inheritedExp: number } | null {
     const vehicle = this.getVehicle(vehicleId);
-    if (!vehicle) return { parts: 0, inheritedTrait: null, inheritedExp: 0 };
-
+    if (!vehicle) return null;
     const config = getVehicleConfig(vehicle.tier);
-    const partsReturned = Math.floor((config?.partsCost ?? 0) * 0.6);
-    this.state.resources.parts += partsReturned;
+    const parts = Math.floor((config?.partsCost ?? 0) * 0.6);
     // 回收工艺：拆解金币返还 30% + 7%×阶数（v1.3 支线 3 阶制）
     const scrapGoldRatio = 0.3 +
       GAME_CONSTANTS.SIDE_RECYCLING_SCRAP_PER_RANK * getSideTechRank(this.state, 'recycling');
-    this.state.resources.gold += Math.floor((config?.buildCost ?? 0) * scrapGoldRatio);
-
+    const gold = Math.floor((config?.buildCost ?? 0) * scrapGoldRatio);
     // 传承：累计经验按比例沉淀进传承池，下一辆新车继承（技术档案每阶 +6 个百分点）
     const lifetimeExp = cumulativeExpForLevel(vehicle.level) + vehicle.exp;
     const inheritRatio = GAME_CONSTANTS.INHERIT_EXP_RATIO
       + GAME_CONSTANTS.SIDE_ARCHIVE_INHERIT_PER_RANK * getSideTechRank(this.state, 'archive');
     const inheritedExp = Math.floor(lifetimeExp * inheritRatio);
-    this.state.garage.inheritanceExp += inheritedExp;
+    return { parts, gold, inheritedExp };
+  }
+
+  scrapVehicle(vehicleId: string): { parts: number; inheritedTrait: TraitType | null; inheritedExp: number } {
+    const vehicle = this.getVehicle(vehicleId);
+    if (!vehicle) return { parts: 0, inheritedTrait: null, inheritedExp: 0 };
+
+    const preview = this.getScrapPreview(vehicleId)!;
+    this.state.resources.parts += preview.parts;
+    this.state.resources.gold += preview.gold;
+    this.state.garage.inheritanceExp += preview.inheritedExp;
 
     let inheritedTrait: TraitType | null = null;
     if (vehicle.trait && Math.random() < GAME_CONSTANTS.TRAIT_INHERIT_CHANCE) {
@@ -369,7 +391,75 @@ export class VehicleSystem {
     }
 
     this.removeFromGarage(vehicleId);
-    return { parts: partsReturned, inheritedTrait, inheritedExp };
+    return { parts: preview.parts, inheritedTrait, inheritedExp: preview.inheritedExp };
+  }
+
+  // ==================== 以旧换新 ====================
+
+  /**
+   * 置换报价：旧车回收（拆解口径）与新车成本（createVehicle 口径）分别列明，
+   * 金币按差价净扣（回收金币先入账再扣新车费用）。ok=false 时 reason 为可读原因。
+   */
+  getTradeInQuote(oldVehicleId: string, newTier: number): TradeInQuote {
+    const fail = (reason: string): TradeInQuote => ({
+      ok: false, reason,
+      scrapParts: 0, scrapGold: 0, inheritedExp: 0,
+      buildGold: 0, buildParts: 0, buildEnergy: 0, buildTime: 0, goldDiff: 0,
+    });
+
+    const old = this.getVehicle(oldVehicleId);
+    if (!old) return fail('旧车不存在');
+    if (old.status !== VehicleStatus.Idle) return fail('车辆派单中/升级中，不可置换');
+    const newConfig = getVehicleConfig(newTier);
+    if (!newConfig) return fail('未知车型');
+    if (newTier <= old.tier) return fail('相同或更低 tier 没有置换意义，可直接拆解旧车');
+
+    // 市场准入（M9）：与 createVehicle 同一解锁矩阵
+    const unmet = getUnmetRequirements(this.state, newTier);
+    if (unmet.length > 0) return fail(`目标车型未解锁：${unmet.join('、')}`);
+
+    // 建造队列有位（1 建造槽 + 排队位，与 createVehicle 同口径）
+    if (this.state.garage.buildQueue.length >= 1 + getBuildQueueMax(this.state)) {
+      return fail('建造队列已满');
+    }
+    // 车位核算：旧车拆解先腾出 1 格（净效果 0），车库满时也允许置换
+    if (this.state.garage.vehicles.length - 1 + this.state.garage.buildQueue.length >= this.state.garage.maxCapacity) {
+      return fail('车库车位不足（含建造队列预留）');
+    }
+
+    const scrap = this.getScrapPreview(oldVehicleId)!;
+    const buildGold = Math.floor(newConfig.buildCost * getUpgradeMult(this.state, 'build_cost'));
+    const buildParts = getEffectivePartsCost(this.state, newConfig.partsCost);
+    const buildEnergy = buildEnergyCost(newTier);
+    const buildTime = Math.max(1, Math.round(newConfig.buildTime * getUpgradeMult(this.state, 'build_time')));
+    const goldDiff = buildGold - scrap.gold;
+
+    // 总余额校验：回收金币/零件先入账再扣新车费用，差额不足则失败
+    if (this.state.resources.gold + scrap.gold < buildGold) {
+      return fail(`金币不足，还差 ${(buildGold - scrap.gold - this.state.resources.gold).toLocaleString()}🪙`);
+    }
+    if (this.state.resources.parts + scrap.parts < buildParts) return fail('零件不足');
+    if (this.state.resources.energy < buildEnergy) return fail(`能源不足，需要 ${buildEnergy}⚡`);
+
+    return {
+      ok: true,
+      scrapParts: scrap.parts, scrapGold: scrap.gold, inheritedExp: scrap.inheritedExp,
+      buildGold, buildParts, buildEnergy, buildTime, goldDiff,
+    };
+  }
+
+  /**
+   * 以旧换新：一次确认完成「旧车拆解回收 + 新车进建造队列」。
+   * 拆解复用 scrapVehicle（传承池/零件/金币返还一致），新车复用 createVehicle
+   * 内部路径（VEHICLE_PRODUCED 等事件链不变）。
+   */
+  tradeIn(oldVehicleId: string, newTier: number): { ok: boolean; reason?: string } {
+    const quote = this.getTradeInQuote(oldVehicleId, newTier);
+    if (!quote.ok) return { ok: false, reason: quote.reason };
+
+    this.scrapVehicle(oldVehicleId);   // 1) 拆解旧车：返还口径与直接拆解一致
+    this.createVehicle(newTier);       // 2) 新车入队：预校验通过，必然成功
+    return { ok: true };
   }
 
   // ==================== 状态管理 ====================

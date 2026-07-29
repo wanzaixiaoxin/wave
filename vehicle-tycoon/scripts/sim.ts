@@ -186,14 +186,14 @@ for (let t = 0; t < SIM_HOURS * 3600; t++) {
   if (best) {
     let canBuild = true;
     if (reservedSize >= state.garage.maxCapacity) {
-      // 车库满：优先扩建；扩不了且能换更高 tier 的车时才拆最低 tier
+      // 车库满：优先扩建；扩不了且能换更高 tier 的车时走以旧换新（拆解+入队一步完成，
+      // 拆解腾位净效果 0，满库也允许；队列 ≥2 时不动，避免金币锁死在排队车辆上）
       if (!economySys.expandGarage()) {
         const lowest = [...state.garage.vehicles].sort((a, b) => a.tier - b.tier)[0];
-        if (lowest && lowest.tier < best.tier) {
-          vehicleSys.scrapVehicle(lowest.id);
-        } else {
-          canBuild = false; // 同级拆建纯亏钱，攒钱等下一档
+        if (lowest && lowest.tier < best.tier && state.garage.buildQueue.length < 2) {
+          vehicleSys.tradeIn(lowest.id, best.tier);
         }
+        canBuild = false; // 满库场景只走置换；同级拆建纯亏钱，攒钱等下一档
       }
     }
     if (canBuild && state.garage.buildQueue.length < 2) {

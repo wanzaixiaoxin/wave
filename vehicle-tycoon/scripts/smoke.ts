@@ -947,5 +947,107 @@ check('技术档案 3 阶 ≥ 原效果', 0.06 * 3 >= 0.15);
 check('回收工艺 3 阶 ≥ 原效果', 0.3 + 0.07 * 3 >= 0.5);
 check('支线阶数查询', getSideTechRank(us, 'lean_mfg') === 0);
 
+// 31. 以旧换新（tradeIn）：差价净扣 / 与拆解+手动造车同口径 / 满库允许 / 拒绝场景
+// 造一辆带 50 经验的 T1 旧车（T2 已解锁），供各断言组复用
+const mkTradeState = () => {
+  const st = SaveManager.createInitialState();
+  st.resources.gold = 1000;
+  st.resources.parts = 500;
+  st.resources.energy = 500;
+  st.techTree.producedCount[0] = 3; // T2 解锁：产 3 辆 T1
+  const vs = new VehicleSystem(st);
+  vs.debugInstantBuild = true;
+  const old = vs.createVehicle(1)!; // T1：-10🪙 -5⚡
+  old.trait = null;                 // 排除特质传承随机性
+  vs.addExp(old.id, 50);            // 带点经验，验证传承池口径
+  return { st, vs, old };
+};
+
+// 31a. 净扣差价 + 与「直接拆解 + 手动造车」账目一致（金币/零件/能源/传承/新车等级）
+{
+  const A = mkTradeState();
+  const goldA0 = A.st.resources.gold;
+  const quoteA = A.vs.getTradeInQuote(A.old.id, 2);
+  check('置换报价可用', quoteA.ok, quoteA.reason);
+  // T1 回收金币 floor(10×0.3)=3；T2 成本 28🪙 → 差价 25
+  check('置换差价 = 28-3 = 25', quoteA.goldDiff === 25, `diff=${quoteA.goldDiff}`);
+  check('置换执行成功', A.vs.tradeIn(A.old.id, 2).ok);
+  check('置换金币净扣差价', A.st.resources.gold === goldA0 - 25,
+    `gold=${A.st.resources.gold} expect=${goldA0 - 25}`);
+  check('旧车移除新车落地', !A.vs.getVehicle(A.old.id) && A.st.garage.vehicles.some(x => x.tier === 2));
+
+  const B = mkTradeState();
+  B.vs.scrapVehicle(B.old.id);
+  B.vs.createVehicle(2);
+  check('置换与拆解+造车金币一致', A.st.resources.gold === B.st.resources.gold,
+    `A=${A.st.resources.gold} B=${B.st.resources.gold}`);
+  check('置换与拆解+造车零件一致', A.st.resources.parts === B.st.resources.parts);
+  check('置换与拆解+造车能源一致', A.st.resources.energy === B.st.resources.energy);
+  check('置换与拆解+造车传承池一致', A.st.garage.inheritanceExp === B.st.garage.inheritanceExp);
+  check('置换新车继承经验一致',
+    A.st.garage.vehicles.find(x => x.tier === 2)!.level === B.st.garage.vehicles.find(x => x.tier === 2)!.level);
+}
+
+// 31b. 车库满时置换允许而普通建造禁止（拆解先腾 1 格，净效果 0）
+{
+  const C = mkTradeState();
+  C.st.garage.maxCapacity = 1; // 车库只剩旧车这 1 格
+  check('车库满时普通建造禁止', C.vs.createVehicle(2) === null);
+  check('车库满时置换允许', C.vs.tradeIn(C.old.id, 2).ok);
+  check('置换后车位数不变', C.st.garage.vehicles.length === 1 && C.st.garage.vehicles[0].tier === 2);
+}
+
+// 31c. 同/低 tier 拒绝（没有经营意义，提示直接拆解）
+{
+  const D = mkTradeState();
+  const old2 = D.vs.createVehicle(2)!; // 再造一辆 T2 作为旧车
+  old2.trait = null;
+  check('置换成同 tier 被拒', !D.vs.tradeIn(old2.id, 2).ok);
+  check('置换成低 tier 被拒', !D.vs.tradeIn(old2.id, 1).ok);
+  check('同/低 tier 拒绝提示直接拆解',
+    (D.vs.getTradeInQuote(old2.id, 1).reason ?? '').includes('拆解'),
+    D.vs.getTradeInQuote(old2.id, 1).reason);
+}
+
+// 31d. 目标车型未解锁拒绝
+{
+  const E = mkTradeState();
+  check('未解锁车型置换被拒', !E.vs.tradeIn(E.old.id, 3).ok); // T3 需产 3 辆 T2
+  check('未解锁原因可读', (E.vs.getTradeInQuote(E.old.id, 3).reason ?? '').includes('未解锁'));
+}
+
+// 31e. 金币不足：拒绝并提示差额（10 + 回收 3 < 28，差 15）
+{
+  const F = mkTradeState();
+  F.st.resources.gold = 10;
+  const qF = F.vs.getTradeInQuote(F.old.id, 2);
+  check('金币不足置换被拒', !qF.ok && !F.vs.tradeIn(F.old.id, 2).ok);
+  check('金币不足提示差额 15', (qF.reason ?? '').includes('15'), qF.reason);
+}
+
+// 31f. 派单中/升级中不可置换，恢复空闲后可用
+{
+  const G = mkTradeState();
+  G.old.status = VehicleStatus.OnOrder;
+  check('派单中车辆置换被拒', !G.vs.tradeIn(G.old.id, 2).ok);
+  G.old.status = VehicleStatus.Maintenance;
+  check('升级中车辆置换被拒', !G.vs.tradeIn(G.old.id, 2).ok);
+  G.old.status = VehicleStatus.Idle;
+  check('恢复空闲后可置换', G.vs.tradeIn(G.old.id, 2).ok);
+}
+
+// 31g. 建造队列满拒绝（真实队列，非 instant）；腾出位置后恢复
+{
+  const H = mkTradeState();
+  H.vs.debugInstantBuild = false;
+  for (let i = 0; i < 4; i++) H.vs.createVehicle(1); // 1 建造槽 + 3 排队 = 满
+  check('队列满时置换被拒', !H.vs.tradeIn(H.old.id, 2).ok);
+  check('队列满原因可读', (H.vs.getTradeInQuote(H.old.id, 2).reason ?? '').includes('队列'));
+  H.st.garage.buildQueue[0].finishAt = Date.now() - 1; // 拨到到点，落地一辆腾位
+  H.vs.tick(1);
+  check('队列腾出后置换恢复', H.vs.tradeIn(H.old.id, 2).ok);
+  check('置换新车进入建造队列', H.st.garage.buildQueue.some(j => j.tier === 2));
+}
+
 console.log(failures === 0 ? '\n全部通过 🎉' : `\n${failures} 项失败`);
 process.exit(failures === 0 ? 0 : 1);

@@ -169,6 +169,10 @@ export function renderFactory(): void {
   const s = getState();
   const fs = getSystems().factorySys;
   document.getElementById('factory-level')!.textContent = s.factory.level.toString();
+  // 等级进度可视化：Lv.x/10 + 圆点
+  document.getElementById('factory-level-max')!.textContent = fs.getMaxLevel().toString();
+  document.getElementById('factory-pips')!.textContent =
+    '●'.repeat(s.factory.level) + '○'.repeat(fs.getMaxLevel() - s.factory.level);
   document.getElementById('factory-pps')!.textContent = fs.getPartsPerSecond().toFixed(2);
   document.getElementById('factory-lines-count')!.textContent = fs.getLineCount().toString();
 
@@ -221,6 +225,9 @@ export function renderFactory(): void {
   const eraName = POWER_ERA_NAMES[Math.min(s.techTree.currentLevel, 5)] ?? POWER_ERA_NAMES[1];
   document.getElementById('power-name')!.textContent = eraName;
   document.getElementById('power-level')!.textContent = s.factory.powerLevel.toString();
+  document.getElementById('power-level-max')!.textContent = GAME_CONSTANTS.POWER_MAX_LEVEL.toString();
+  document.getElementById('power-pips')!.textContent =
+    '●'.repeat(s.factory.powerLevel) + '○'.repeat(GAME_CONSTANTS.POWER_MAX_LEVEL - s.factory.powerLevel);
   document.getElementById('power-rate')!.textContent = fs.getEnergyPerSecond().toFixed(2);
 
   const cap = fs.getEnergyCapacity();
@@ -312,6 +319,16 @@ export function renderTech(): void {
   const researchRemain = researching
     ? Math.max(0, Math.ceil((researching.finishAt - Date.now()) / 1000))
     : 0;
+
+  // 当前科技等级总览：Lv.x/5 + 等级名 + 圆点
+  const summaryEl = document.getElementById('tech-summary');
+  if (summaryEl) {
+    const cur = s.techTree.currentLevel;
+    const curName = TECH_CONFIGS.find(c => c.level === cur)?.name ?? '';
+    summaryEl.innerHTML =
+      `当前等级：<strong>Lv.${cur}/${TECH_CONFIGS.length}</strong>（${curName}）` +
+      ` <span class="rank-pips">${'●'.repeat(cur) + '○'.repeat(TECH_CONFIGS.length - cur)}</span>`;
+  }
 
   for (const cfg of TECH_CONFIGS) {
     const i = cfg.level;

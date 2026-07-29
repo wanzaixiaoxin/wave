@@ -3,7 +3,7 @@
 // ============================================================
 
 import { Vehicle, Quality, TraitType, VehicleStats, Specialization } from '../core/types';
-import { getVehicleConfig } from '../config/VehicleConfig';
+import { getVehicleConfig, getUnmetRequirements, VEHICLE_CONFIGS } from '../config/VehicleConfig';
 import { GAME_CONSTANTS, statUpgradeCost } from '../config/GameConstants';
 import { getState, getSystems, requestRender } from './context';
 import { getTraitName, getTraitDesc, getQualityLabel, pickRandomNames } from './format';
@@ -55,9 +55,11 @@ export function renderGarage(): void {
       : '';
 
     card.innerHTML = `
+      <span class="tier-badge">T${v.tier}</span>
       ${badge}
       <div class="emoji">${config?.emoji || '🚗'}</div>
       <div class="name">${v.name}</div>
+      <div style="text-align:center;font-size:10px;color:var(--text-3);font-weight:700;">${config?.name || ''}</div>
       <div style="text-align:center;margin:4px 0;">
         Lv.${v.level}/${maxLv} ${v.isEvolved ? '🌟' : ''}
       </div>
@@ -90,7 +92,7 @@ export function showVehicleDetail(v: Vehicle): void {
   const wearLine = `<p style="color:${wearColor};">🔧 磨损 ${Math.floor(v.wear)}/100${v.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD ? '（收入-30% 耗时+20%，快保养！）' : ''} · 😮‍💨 连单 ${v.consecutiveOrders}（越多收入越低，空闲30秒恢复）</p>`;
 
   const detail = `
-    <p>${config?.emoji} <strong>${v.name}</strong> · ${config?.name || 'T' + v.tier}</p>
+    <p>${config?.emoji} <strong>${v.name}</strong> · T${v.tier} ${config?.name || ''}</p>
     <p>📊 Lv.${v.level}/${maxLv} | 品质: ${getQualityLabel(v.quality)}</p>
     <p>🧬 特质: ${getTraitName(v.trait)}${getTraitDesc(v.trait) ? `（${getTraitDesc(v.trait)}）` : ''} ${v.trait === TraitType.Lucky ? '🔥稀有' : ''}</p>
     ${specLine}
@@ -235,6 +237,13 @@ export function showVehicleDetail(v: Vehicle): void {
     });
   }
 
+  // ---------- 以旧换新（Idle 可用：拆解回收 + 新车入队一次完成） ----------
+  if (v.status === 'idle') {
+    buttons.push('🔁 以旧换新', () => {
+      showTradeInModal(v);
+    });
+  }
+
   // ---------- 拆解 ----------
   buttons.push('🔧 拆解', () => {
     const result = sys.vehicleSys.scrapVehicle(v.id);
@@ -244,4 +253,111 @@ export function showVehicleDetail(v: Vehicle): void {
   });
 
   showModal(`${config?.emoji} ${v.name}`, [detail], ...buttons);
+}
+
+// ==================== 以旧换新弹窗 ====================
+
+/**
+ * 置换窗口：目标车型下拉（只列已解锁且 tier 更高的车型，默认 tier+1）+ 实时清单。
+ * 数值统一走 vehicleSys.getTradeInQuote（与 tradeIn 校验同一口径）。
+ */
+function showTradeInModal(v: Vehicle): void {
+  const sys = getSystems();
+  const state = getState();
+  const oldConfig = getVehicleConfig(v.tier);
+
+  // 目标车型：已解锁且 tier 更高（同/低 tier 没有经营意义，直接拆解即可）
+  const targets = VEHICLE_CONFIGS.filter(c =>
+    c.tier > v.tier && getUnmetRequirements(state, c.tier).length === 0
+  );
+
+  const overlay = document.getElementById('modal-overlay')!;
+  const content = document.getElementById('modal-content')!;
+  content.innerHTML = `<h2>🔁 以旧换新：${v.name}</h2>`;
+
+  if (targets.length === 0) {
+    content.innerHTML += '<p>暂无可置换的更高 tier 车型（先解锁新车型再来吧）</p>';
+    const btnRow = document.createElement('div');
+    btnRow.className = 'btn-row';
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '关闭';
+    closeBtn.onclick = (e) => { e.stopPropagation(); hideModal(); };
+    btnRow.appendChild(closeBtn);
+    content.appendChild(btnRow);
+    overlay.classList.add('visible');
+    return;
+  }
+
+  // 目标车型下拉：默认选中 tier+1（否则列表第一项）
+  const select = document.createElement('select');
+  select.className = 'dispatch-select';
+  for (const c of targets) {
+    const opt = document.createElement('option');
+    opt.value = c.tier.toString();
+    opt.textContent = `${c.emoji} T${c.tier} ${c.name}`;
+    select.appendChild(opt);
+  }
+  select.value = (targets.find(c => c.tier === v.tier + 1) ?? targets[0]).tier.toString();
+  content.appendChild(select);
+
+  const quoteBox = document.createElement('div');
+  content.appendChild(quoteBox);
+
+  const btnRow = document.createElement('div');
+  btnRow.className = 'btn-row';
+  const confirmBtn = document.createElement('button');
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = '取消';
+  cancelBtn.onclick = (e) => { e.stopPropagation(); hideModal(); };
+  btnRow.appendChild(confirmBtn);
+  btnRow.appendChild(cancelBtn);
+  content.appendChild(btnRow);
+
+  // 实时清单：旧车回收 / 新车成本 / 实际需补 / 建造耗时
+  const renderQuote = (): void => {
+    const newTier = parseInt(select.value, 10);
+    const newConfig = getVehicleConfig(newTier)!;
+    const q = sys.vehicleSys.getTradeInQuote(v.id, newTier);
+
+    if (!q.ok) {
+      quoteBox.innerHTML = `<p style="color:var(--red);font-weight:700;">❌ ${q.reason}</p>`;
+      confirmBtn.textContent = '🔁 确认置换';
+      confirmBtn.disabled = true;
+      return;
+    }
+
+    const inheritLine = q.inheritedExp > 0 ? `（传承池 +${q.inheritedExp.toLocaleString()} 经验）` : '';
+    const diffShort = q.goldDiff - state.resources.gold; // 还差多少（正数=不够）
+    const diffLine = diffShort > 0
+      ? `<p style="color:var(--red);font-weight:700;">💰 实际需补：-${q.goldDiff.toLocaleString()}🪙（还差 ${diffShort.toLocaleString()}🪙）</p>`
+      : `<p>💰 实际需补：-${q.goldDiff.toLocaleString()}🪙</p>`;
+    quoteBox.innerHTML = `
+      <p>♻️ 旧车回收（${oldConfig?.emoji}${oldConfig?.name}）：+${q.scrapParts.toLocaleString()}⚙️ +${q.scrapGold.toLocaleString()}🪙${inheritLine}</p>
+      <p>🏭 新车成本（${newConfig.emoji}${newConfig.name}）：-${q.buildGold.toLocaleString()}🪙 -${q.buildParts.toLocaleString()}⚙️ -${q.buildEnergy.toLocaleString()}⚡</p>
+      ${diffLine}
+      <p>⏱️ 建造耗时：${q.buildTime}s（建完自动进车库）</p>
+    `;
+    confirmBtn.textContent = diffShort > 0 ? '🔁 金币不足' : '🔁 确认置换';
+    confirmBtn.disabled = diffShort > 0;
+  };
+  select.onchange = renderQuote;
+  renderQuote();
+
+  confirmBtn.onclick = (e) => {
+    e.stopPropagation();
+    const newTier = parseInt(select.value, 10);
+    const newConfig = getVehicleConfig(newTier)!;
+    const q = sys.vehicleSys.getTradeInQuote(v.id, newTier);
+    const res = sys.vehicleSys.tradeIn(v.id, newTier);
+    overlay.classList.remove('visible');
+    if (res.ok) {
+      showToast('🔁 置换成功', `${oldConfig?.emoji}${v.name} → ${newConfig.emoji}${newConfig.name}，补差价 ${q.goldDiff.toLocaleString()}🪙`);
+      addLog(`🔁 ${oldConfig?.emoji} ${v.name} 置换了 ${newConfig.emoji} ${newConfig.name}，补差价 ${q.goldDiff.toLocaleString()}🪙`);
+    } else {
+      addLog(`❌ 置换失败：${res.reason}`);
+    }
+    requestRender();
+  };
+
+  overlay.classList.add('visible');
 }
