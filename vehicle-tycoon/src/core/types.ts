@@ -49,7 +49,7 @@ export enum TraitType {
   Quick = 'quick',       // 高速：订单耗时 -15%
   Strong = 'strong',     // 重载：收入 +20%
   Precise = 'precise',   // 精准：暴击 +5%
-  Smart = 'smart',       // 老练：经验 +20%
+  Smart = 'smart',       // 老练：磨合增速 +20%（S2a：原经验加成改为磨合）
   Lucky = 'lucky',       // 幸运：暴击 ×3（稀有）
   Wealth = 'wealth',     // 节能：收入 +10%
 }
@@ -65,7 +65,6 @@ export enum TechLevel {
 export enum GameEvent {
   // 车辆事件
   VEHICLE_PRODUCED = 'vehicle:produced',
-  VEHICLE_LEVEL_UP = 'vehicle:level_up',
   VEHICLE_RETIRED = 'vehicle:retired',
   VEHICLE_TRAIT_INHERITED = 'vehicle:trait_inherited',
   VEHICLE_STATS_CHANGED = 'vehicle:stats_changed',
@@ -117,7 +116,7 @@ export enum GameEvent {
 export interface VehicleStats {
   speed: number;       // 0-5，每级订单耗时 -4%
   cargo: number;       // 0-5，每级收入 +4%
-  durability: number;  // 0-5，≥3 可接长途单
+  durability: number;  // 0-5，≥3 可接长途单；每级每单磨损 -8%（S2a 修复 3 级后零收益）
 }
 
 /**
@@ -126,15 +125,15 @@ export interface VehicleStats {
 export enum Specialization {
   Express = 'express',   // 快运：耗时 -25%，收入 -10%
   Heavy = 'heavy',       // 重载：收入 +25%，耗时 +15%
-  Steady = 'steady',     // 耐用：磨损减半，经验 +15%
+  Steady = 'steady',     // 耐用：磨损减半，磨合增速 +15%
 }
 
 export interface Vehicle {
   id: string;
   tier: number;                    // 1-10
   name: string;
-  level: number;                   // 1-10
-  exp: number;
+  mileage: number;                 // 累计里程（公里，S2a 替代等级/经验）：磨合加成与残值折旧的驱动量
+  refurbishCount: number;          // 已翻新次数（每车限 REFURBISH_MAX_COUNT 次）
   quality: Quality;
   trait: TraitType | null;
   stats: VehicleStats;
@@ -155,8 +154,8 @@ export interface Order {
   type: OrderType;
   tier: number;                    // 订单等级（1-10），低 tier 车辆不能接高 tier 订单
   baseReward: number;
-  expReward: number;
   duration: number;                // seconds
+  assignedAt?: number;             // 派单时间戳（毫秒，S2a）：结算时推算实际耗时用于里程累积
   requiredDurability?: number;
   requiredQuality?: Quality;
   assignedVehicleId: string | null;
@@ -214,9 +213,8 @@ export interface Factory {
 }
 
 export interface Garage {
-  maxCapacity: number;
+  maxCapacity: number;        // 车库容量（占格数口径，S2a）：各车 parkingSpaces 之和不得超过
   vehicles: Vehicle[];
-  inheritanceExp: number;   // 传承池：拆解车辆沉淀的经验，下一辆新车落地继承
   buildQueue: BuildJob[];   // 建造队列（M7）：下标 0 为建造槽，最多 1 + BUILD_QUEUE_MAX 个
 }
 
@@ -262,7 +260,7 @@ export interface AchievementCondition {
   type: 'produce_count' | 'quality_count' | 'profit_total'
        | 'order_count' | 'stats_max' | 'tradein_count'
        | 'total_orders' | 'tech_level' | 'factory_level'
-       | 'inherit_count' | 'side_tech_count';
+       | 'refurbish_count' | 'side_tech_count';
   target: number;
   params?: Record<string, unknown>;
 }
@@ -278,7 +276,7 @@ export interface GameStats {
   totalVehiclesProduced: number;
   totalOrdersCompleted: number;
   totalTradeIns: number;            // 以旧换新累计次数
-  totalVehiclesInherited: number;   // 触发传承（新车继承经验）的次数
+  totalRefurbishes: number;         // 累计翻新次数（S2a）
   totalPlayTime: number;
   offlineTime: number;
 }
@@ -350,7 +348,7 @@ export interface SideTechConfigEntry {
   description: string;
   requiredLevel: number;   // 需要主线科技等级
   maxRank: number;         // 3 阶
-  effectKey: string;       // 效果标识：'order_interval' | 'parts_cost' | 'inherit_ratio' | 'scrap_gold'
+  effectKey: string;       // 效果标识：'order_interval' | 'parts_cost' | 'residual_value' | 'scrap_gold'
   valuePerRank: number;    // 每阶效果量（线性叠加，符号自带方向）
   goldCosts: number[];     // 各阶金币费用（逐阶递增）
   partsCosts: number[];    // 各阶零件费用（逐阶递增）

@@ -32,7 +32,7 @@ function computeSignature(): string {
     .map(o => `${o.id}:${o.status}:${o.assignedVehicleId ?? ''}`)
     .join('|');
   const vehiclePart = s.garage.vehicles
-    .map(v => `${v.id}:${v.status}:${v.level}:${v.quality}:${v.name}`)
+    .map(v => `${v.id}:${v.status}:${Math.floor(v.mileage)}:${v.quality}:${v.name}`)
     .join('|');
   return `${orderPart}#${vehiclePart}`;
 }
@@ -86,7 +86,7 @@ export function renderOrders(): void {
     div.innerHTML = `
       <div class="type">${TYPE_NAMES[o.type] || o.type} <span style="font-size:10px;color:var(--text-3);">T${o.tier}</span></div>
       <div class="reward">+${o.baseReward}🪙</div>
-      <div style="font-size:11px;color:var(--text-3);">经验 ${o.expReward}</div>
+      <div style="font-size:11px;color:var(--text-3);">⏱️ ${o.duration}s</div>
       ${repCostLine}
       <div class="vehicle-hint">${vehicleInfo}</div>
     `;
@@ -99,7 +99,7 @@ export function renderOrders(): void {
       idle.forEach(v => {
         const opt = document.createElement('option');
         opt.value = v.id;
-        opt.textContent = `${QUALITY_ICONS[v.quality] || ''} ${v.name} Lv.${v.level}`;
+        opt.textContent = `${QUALITY_ICONS[v.quality] || ''} ${v.name} T${v.tier}`;
         select!.appendChild(opt);
       });
       if (selectedVehicleByOrder[o.id] && idle.some(v => v.id === selectedVehicleByOrder[o.id])) {

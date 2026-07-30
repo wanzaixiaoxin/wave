@@ -1,13 +1,13 @@
 // 冒烟测试：验证本次修复的核心数值逻辑（node 环境，不触碰 DOM）
 import { SaveManager } from '../src/core/SaveManager';
-import { VehicleSystem } from '../src/systems/VehicleSystem';
+import { VehicleSystem, getResidualValue, getSellPrice } from '../src/systems/VehicleSystem';
 import { OrderSystem } from '../src/systems/OrderSystem';
 import { EconomySystem, getGlobalIncomeMult } from '../src/systems/EconomySystem';
 import { EventSystem, getEventMultiplier } from '../src/systems/EventSystem';
 import { AchievementSystem } from '../src/systems/AchievementSystem';
 import { Quality, OrderType, TraitType, VehicleStatus, OrderStatus, Specialization } from '../src/core/types';
-import { GAME_CONSTANTS, cumulativeExpForLevel } from '../src/config/GameConstants';
-import { getVehicleConfig, getUnmetRequirements } from '../src/config/VehicleConfig';
+import { GAME_CONSTANTS, getBreakinBonus, getMileageLifespan, overhaulPartsCost } from '../src/config/GameConstants';
+import { getVehicleConfig, getUnmetRequirements, getOccupiedSpaces, getParkingSpaces } from '../src/config/VehicleConfig';
 import { FactorySystem, getBuildQueueMax } from '../src/systems/FactorySystem';
 import { TechSystem, getEffectivePartsCost, getSideTechRank } from '../src/systems/TechSystem';
 import { getUpgradeMult, getSubTechRank, getRetrofitLevel } from '../src/systems/UpgradeSystem';
@@ -64,7 +64,7 @@ state.factory.level = 3;                // M9：T5 需工厂 L3
 
 // 7. 高速出厂参数：接单耗时 ×0.85
 state.orders.push({
-  id: 'o_test', type: OrderType.Normal, tier: 1, baseReward: 10, expReward: 20, duration: 30,
+  id: 'o_test', type: OrderType.Normal, tier: 1, baseReward: 10, duration: 30,
   assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
 });
 v.trait = TraitType.Quick;
@@ -79,7 +79,7 @@ check('订单完成后车辆空闲', v.status === VehicleStatus.Idle);
 // 8. 零件产出：收入1% + tier 保底
 const partsBefore = state.resources.parts;
 state.orders.push({
-  id: 'o_test2', type: OrderType.Normal, tier: 1, baseReward: 10, expReward: 20, duration: 30,
+  id: 'o_test2', type: OrderType.Normal, tier: 1, baseReward: 10, duration: 30,
   assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
 });
 orderSys.assignVehicle('o_test2', v.id);
@@ -102,12 +102,15 @@ check('五维全能成就解锁', allRounder.isUnlocked);
 const tradeinAch = state.achievements.find(a => a.id === 'tradein_master')!;
 check('更新换代成就未误解锁', !!tradeinAch && !tradeinAch.isUnlocked);
 
-// 12. 经验数值：首单 20 经验
-check('普通单经验 = 20', GAME_CONSTANTS.ORDER_NORMAL_EXP_BASE === 20);
+// 12. 磨合数值（S2a 替代经验）：每 1000km +4%，上限 +40%
+check('磨合 0km = +0%', getBreakinBonus(0) === 0);
+check('磨合 5000km = +20%', Math.abs(getBreakinBonus(5000) - 0.2) < 1e-9);
+check('磨合 10000km 触及上限 +40%', getBreakinBonus(10000) === GAME_CONSTANTS.BREAKIN_MAX);
+check('磨合 20000km 仍封顶 +40%', getBreakinBonus(20000) === GAME_CONSTANTS.BREAKIN_MAX);
 
 // 13. 订单分级：低 tier 车不能接高 tier 单
 const highOrder: import('../src/core/types').Order = {
-  id: 'o_tier', type: OrderType.Valuable, tier: 8, baseReward: 840000, expReward: 60, duration: 60,
+  id: 'o_tier', type: OrderType.Valuable, tier: 8, baseReward: 840000, duration: 60,
   requiredQuality: Quality.Blue,
   assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
 };
@@ -147,7 +150,7 @@ check('重载运营配置收入 ×1.25', Math.abs(heavy / refSpec - 1.25) < 0.03
 const measureDuration = (): number => {
   const id = `o_dur_${Date.now()}_${Math.random()}`;
   state.orders.push({
-    id, type: OrderType.Normal, tier: 1, baseReward: 10, expReward: 20, duration: 30,
+    id, type: OrderType.Normal, tier: 1, baseReward: 10, duration: 30,
     assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
   });
   const before = Date.now();
@@ -178,19 +181,127 @@ check('运营配置不可更改', !vehicleSys.specialize(v.id, Specialization.Ex
 v.quality = Quality.White;
 v.specialization = null;
 
-// 21. 拆解传承：累计经验按比例入池，下一辆新车落地继承
-const donor = vehicleSys.createVehicle(1)!;
-donor.trait = null;
-vehicleSys.addExp(donor.id, cumulativeExpForLevel(4));
-const donorLifetime = cumulativeExpForLevel(donor.level) + donor.exp;
-const expectedPool = Math.floor(donorLifetime * GAME_CONSTANTS.INHERIT_EXP_RATIO);
-const poolBefore = state.garage.inheritanceExp;
-vehicleSys.scrapVehicle(donor.id);
-check('拆解经验入传承池', state.garage.inheritanceExp - poolBefore === expectedPool,
-  `delta=${state.garage.inheritanceExp - poolBefore} expect=${expectedPool}`);
-const heir = vehicleSys.createVehicle(1)!;
-check('新车继承传承经验', heir.level > 1 && state.garage.inheritanceExp === 0,
-  `level=${heir.level} pool=${state.garage.inheritanceExp}`);
+// 21. S2a 里程累积：完成订单按实际耗时 × (5 + tier) 累加里程
+state.garage.maxCapacity = 100; // 测试扩容：排除占格容量干扰（占格判定在 21g 单独断言）
+state.resources.parts = 100_000; // 补足零件：翻新/造车/检修断言不被存量干扰
+const mV = vehicleSys.createVehicle(1)!;
+mV.trait = null;
+state.orders.push({
+  id: 'o_mile', type: OrderType.Normal, tier: 1, baseReward: 10, duration: 30,
+  assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
+});
+orderSys.assignVehicle('o_mile', mV.id);
+state.orders.find(o => o.id === 'o_mile')!.assignedAt = Date.now() - 30000; // 模拟实际跑了 30 秒
+orderSys.completeOrder('o_mile');
+check('T1 跑 30s 里程 +180km（30×(5+1)）', mV.mileage >= 175 && mV.mileage <= 185, `mileage=${mV.mileage}`);
+// 老练出厂参数：磨合增速 +20%
+const mV2 = vehicleSys.createVehicle(1)!;
+mV2.trait = TraitType.Smart;
+state.orders.push({
+  id: 'o_mile2', type: OrderType.Normal, tier: 1, baseReward: 10, duration: 30,
+  assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
+});
+orderSys.assignVehicle('o_mile2', mV2.id);
+state.orders.find(o => o.id === 'o_mile2')!.assignedAt = Date.now() - 30000;
+orderSys.completeOrder('o_mile2');
+check('老练磨合增速 ×1.2（≥210km）', mV2.mileage >= 210, `mileage=${mV2.mileage}`);
+
+// 21b. S2a 残值曲线（里程/磨损两轴，T5 卡车 buildCost 1100，寿命 15000km）
+const rV = vehicleSys.createVehicle(5)!;
+rV.trait = null;
+rV.mileage = 0; rV.wear = 0;
+check('残值：新车 = 实付价', getResidualValue(state, rV) === 1100, `res=${getResidualValue(state, rV)}`);
+rV.mileage = 7500;
+check('残值：半寿命 = 50%', getResidualValue(state, rV) === 550, `res=${getResidualValue(state, rV)}`);
+rV.mileage = 15000;
+check('残值：满寿命触及 15% 下限', getResidualValue(state, rV) === Math.floor(1100 * 0.15),
+  `res=${getResidualValue(state, rV)}`);
+rV.mileage = 99999;
+check('残值：超寿命仍保底 15%', getResidualValue(state, rV) === Math.floor(1100 * 0.15));
+rV.mileage = 0; rV.wear = 100;
+check('残值：磨损 100 → ×(1-100/200)', getResidualValue(state, rV) === 550, `res=${getResidualValue(state, rV)}`);
+rV.wear = 0;
+
+// 21c. S2a 翻新：磨损清零 + 里程×0.4 折旧回春，每车限 2 次
+rV.mileage = 10000; rV.wear = 80;
+const resBeforeRefurb = getResidualValue(state, rV);
+const goldBeforeRefurb = state.resources.gold;
+const partsBeforeRefurb = state.resources.parts;
+check('翻新成功', vehicleSys.refurbish(rV.id));
+check('翻新扣费 385🪙+30⚙️', goldBeforeRefurb - state.resources.gold === 385
+  && partsBeforeRefurb - state.resources.parts === 30,
+  `gold=${goldBeforeRefurb - state.resources.gold} parts=${partsBeforeRefurb - state.resources.parts}`);
+check('翻新磨损清零', rV.wear === 0);
+check('翻新里程 ×0.4', rV.mileage === 4000, `mileage=${rV.mileage}`);
+check('翻新后残值回升', getResidualValue(state, rV) > resBeforeRefurb,
+  `before=${resBeforeRefurb} after=${getResidualValue(state, rV)}`);
+check('第二次翻新成功', vehicleSys.refurbish(rV.id));
+check('翻新达上限 2 次后拒绝', !vehicleSys.refurbish(rV.id) && rV.refurbishCount === 2);
+
+// 21d. S2a 出售 vs 拆解口径差异：出售全残值金币无零件，拆解金币 30% 残值 + 零件 60%
+const sV = vehicleSys.createVehicle(5)!;
+sV.trait = null; sV.mileage = 7500; sV.wear = 0; // 残值 550
+const sellGold = state.resources.gold;
+const sellParts = state.resources.parts;
+const sellGot = vehicleSys.sellVehicle(sV.id);
+check('出售获得残值金币', sellGot === 550 && state.resources.gold - sellGold === 550, `got=${sellGot}`);
+check('出售不给零件', state.resources.parts === sellParts);
+const dV = vehicleSys.createVehicle(5)!;
+dV.trait = null; dV.mileage = 7500; dV.wear = 0;
+const scrapGoldB = state.resources.gold;
+const scrapPartsB = state.resources.parts;
+vehicleSys.scrapVehicle(dV.id);
+check('拆解金币 = 残值×30%', state.resources.gold - scrapGoldB === Math.floor(550 * 0.3),
+  `delta=${state.resources.gold - scrapGoldB}`);
+check('拆解零件 = 60%', state.resources.parts - scrapPartsB === Math.floor(60 * 0.6),
+  `delta=${state.resources.parts - scrapPartsB}`);
+check('出售金币 > 拆解金币（无零件换高价）', 550 > Math.floor(550 * 0.3));
+
+// 21e. S2a 检修成本随里程浮动：2⚙️ + floor(里程/2000)⚙️
+check('检修成本 0km = 2⚙️', overhaulPartsCost(0) === 2);
+check('检修成本 4000km = 4⚙️', overhaulPartsCost(4000) === 4);
+const oV = vehicleSys.createVehicle(1)!;
+oV.trait = null; oV.mileage = 4000; oV.wear = 50;
+state.resources.parts = 100;
+const partsBeforeOv = state.resources.parts;
+check('高里程检修成功', vehicleSys.overhaul(oV.id));
+check('高里程检修扣 4⚙️', partsBeforeOv - state.resources.parts === 4,
+  `delta=${partsBeforeOv - state.resources.parts}`);
+check('高里程检修后磨损清零', oV.wear === 0);
+
+// 21f. S2a 耐久属性减磨损：每级每单磨损 -8%（5 级 -40%，修复 3 级后零收益）
+const wV = vehicleSys.createVehicle(1)!;
+wV.trait = null; wV.stats.durability = 5;
+state.orders.push({
+  id: 'o_wear', type: OrderType.Normal, tier: 1, baseReward: 10, duration: 30,
+  assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
+});
+orderSys.assignVehicle('o_wear', wV.id);
+orderSys.completeOrder('o_wear');
+check('耐久 5 级每单磨损 5×(1-0.4)=3', Math.abs(wV.wear - 3) < 1e-9, `wear=${wV.wear}`);
+
+// 21g. S2a parkingSpaces 占格容量：T1-3=1 / T4-6=2 / T7-8=3 / T9-10=4
+check('占格矩阵 T1=1 T4=2 T7=3 T9=4',
+  getParkingSpaces(1) === 1 && getParkingSpaces(4) === 2
+  && getParkingSpaces(7) === 3 && getParkingSpaces(9) === 4);
+{
+  const ps = SaveManager.createInitialState();
+  ps.resources.gold = 10_000_000;
+  ps.resources.parts = 1_000_000;
+  ps.resources.energy = 1_000_000;
+  ps.resources.reputation = 100_000;
+  ps.techTree.currentLevel = 2;
+  const pvs = new VehicleSystem(ps);
+  pvs.debugInstantBuild = true;
+  pvs.createVehicle(4); pvs.createVehicle(4); pvs.createVehicle(4); // 3×T4 = 6 格（初始容量 6 格）
+  check('3×T4 占满 6 格', getOccupiedSpaces(ps) === 6, `used=${getOccupiedSpaces(ps)}`);
+  check('占格满后 T4 被拒', pvs.createVehicle(4) === null);
+  check('占格满后 T1（1 格）也被拒', pvs.createVehicle(1) === null);
+  const removed = ps.garage.vehicles[0];
+  pvs.scrapVehicle(removed.id); // 腾出 2 格
+  check('拆一辆 T4 后 T1 可入', pvs.createVehicle(1) !== null);
+  check('占格口径：2×T4+1×T1 = 5 格', getOccupiedSpaces(ps) === 5, `used=${getOccupiedSpaces(ps)}`);
+}
 
 // 22. 工厂超负荷运转：产出 ×2，冷却期不可重复激活
 const factorySys = new FactorySystem(state);
@@ -218,23 +329,22 @@ check('满阶后重复研究被拒', !techSys.researchSideTech('lean_mfg'));
 check('精益制造 3 阶零件折扣 ×0.73', getEffectivePartsCost(state, 100) === 73);
 check('研究技术档案 1 阶', techSys.researchSideTech('archive'));
 
+// 技术档案（S2a 改残值体系）：出售残值金币每阶 +7%
 const donor2 = vehicleSys.createVehicle(1)!;
-donor2.trait = null;
-vehicleSys.addExp(donor2.id, cumulativeExpForLevel(3));
-const lifetime2 = cumulativeExpForLevel(donor2.level) + donor2.exp;
-const expected2 = Math.floor(lifetime2 * (GAME_CONSTANTS.INHERIT_EXP_RATIO + GAME_CONSTANTS.SIDE_ARCHIVE_INHERIT_PER_RANK));
-const poolB2 = state.garage.inheritanceExp;
-vehicleSys.scrapVehicle(donor2.id);
-check('技术档案 1 阶传承比例 0.56', state.garage.inheritanceExp - poolB2 === expected2,
-  `delta=${state.garage.inheritanceExp - poolB2} expect=${expected2}`);
+donor2.trait = null; donor2.mileage = 0; donor2.wear = 0; // T1 残值 = 10
+const goldB2 = state.resources.gold;
+const expected2 = Math.floor(10 * (1 + GAME_CONSTANTS.SIDE_ARCHIVE_RESIDUAL_PER_RANK));
+vehicleSys.sellVehicle(donor2.id);
+check('技术档案 1 阶出售残值 ×1.07', state.resources.gold - goldB2 === expected2,
+  `delta=${state.resources.gold - goldB2} expect=${expected2}`);
 
 check('研究回收工艺 1 阶', techSys.researchSideTech('recycling'));
 const donor3 = vehicleSys.createVehicle(1)!;
+donor3.trait = null; donor3.mileage = 0; donor3.wear = 0; // T1 残值 = 10
 const goldB3 = state.resources.gold;
-const t1BuildCost = getVehicleConfig(1)!.buildCost;
 vehicleSys.scrapVehicle(donor3.id);
-check('回收工艺 1 阶拆解返还 37%', state.resources.gold - goldB3 === Math.floor(t1BuildCost * (0.3 + GAME_CONSTANTS.SIDE_RECYCLING_SCRAP_PER_RANK)),
-  `delta=${state.resources.gold - goldB3} expect=${Math.floor(t1BuildCost * 0.37)}`);
+check('回收工艺 1 阶拆解返还 = 残值×37%', state.resources.gold - goldB3 === Math.floor(10 * (0.3 + GAME_CONSTANTS.SIDE_RECYCLING_SCRAP_PER_RANK)),
+  `delta=${state.resources.gold - goldB3} expect=${Math.floor(10 * 0.37)}`);
 
 // 24. 新成就条件：科技/工厂/支线
 const achieveSys = new AchievementSystem(state);
@@ -250,7 +360,7 @@ check('博采众长成就解锁', !!state.achievements.find(a => a.id === 'side_
 // 派一单并注入指定路上事件（triggerAt 已到点），返回订单
 const assignWithEvent = (id: string, eventId: string): import('../src/core/types').Order => {
   state.orders.push({
-    id, type: OrderType.Normal, tier: 1, baseReward: 100, expReward: 20, duration: 30,
+    id, type: OrderType.Normal, tier: 1, baseReward: 100, duration: 30,
     assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
   });
   orderSys.assignVehicle(id, v.id);
@@ -311,7 +421,7 @@ v.stats.durability = 2;
 check('耐久不足不可出示年检', !orderSys.isEnRouteChoiceAvailable(policeCfg.choices[2], v));
 // 注入一个 12 秒前已触发且未决策的事件 → tick 超时兜底；默认项（年检）不可用 → 退到「配合」+10s
 state.orders.push({
-  id: 'o_er_police', type: OrderType.Normal, tier: 1, baseReward: 100, expReward: 20, duration: 30,
+  id: 'o_er_police', type: OrderType.Normal, tier: 1, baseReward: 100, duration: 30,
   assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
 });
 orderSys.assignVehicle('o_er_police', v.id);
@@ -329,7 +439,7 @@ v.stats.durability = 5; // 还原
 
 // 25e. 超时默认项（可用时）：修路「等一等」+8s
 state.orders.push({
-  id: 'o_er_wait', type: OrderType.Normal, tier: 1, baseReward: 100, expReward: 20, duration: 30,
+  id: 'o_er_wait', type: OrderType.Normal, tier: 1, baseReward: 100, duration: 30,
   assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
 });
 orderSys.assignVehicle('o_er_wait', v.id);
@@ -347,10 +457,10 @@ orderSys.completeOrder('o_er_wait');
 const realRandom = Math.random;
 Math.random = () => 0.99; // 不暴击；派单事件排定掷骰 0.99 也不排定（由注入代替）
 const runOrderIncome = (withMult: boolean): number => {
-  v.level = 5; v.exp = 0; v.wear = 0; v.consecutiveOrders = 0; v.lastOrderCompletedAt = 0;
+  v.mileage = 0; v.wear = 0; v.consecutiveOrders = 0; v.lastOrderCompletedAt = 0;
   const id = withMult ? 'o_er_mult' : 'o_er_base';
   state.orders.push({
-    id, type: OrderType.Normal, tier: 1, baseReward: 100, expReward: 20, duration: 30,
+    id, type: OrderType.Normal, tier: 1, baseReward: 100, duration: 30,
     assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
   });
   orderSys.assignVehicle(id, v.id);
@@ -369,7 +479,7 @@ check('pendingRewardMult ×1.3 乘入结算', Math.abs(incMult / incBase - 1.3) 
   `mult=${incMult} base=${incBase}`);
 
 // 25g. 交警「塞红包」：金币 -本单期望收入 10%
-v.level = 5; v.exp = 0; v.wear = 0; v.consecutiveOrders = 0; v.lastOrderCompletedAt = 0;
+v.mileage = 0; v.wear = 0; v.consecutiveOrders = 0; v.lastOrderCompletedAt = 0;
 const estIncome = EconomySystem.calculateOrderIncome(
   v, 100, 1.0, getGlobalIncomeMult(state), false, state, OrderType.Normal
 ).income;
@@ -402,7 +512,6 @@ hs.techTree.producedCount[2] = 0;
 const hv = hsVehicleSys.createVehicle(1)!;
 hv.trait = null;
 hv.quality = Quality.Gold;
-hv.level = GAME_CONSTANTS.MAX_VEHICLE_LEVEL;
 hv.specialization = Specialization.Steady; // 摘掉运营配置提示（规则 3 优先于磨损）
 hv.wear = 75;
 const hWear = computeHint(hs, hsTech.getNextResearchable())!;
@@ -446,14 +555,15 @@ rs.techTree.researching!.finishAt = Date.now() - 1; // 拨到到点
 rTechSys.tick(1);
 check('研究到点生效', rs.techTree.isResearched[1] && rs.techTree.currentLevel === 2 && rs.techTree.researching === null);
 
-// 27c. 升品锁车：期间 Maintenance 不可派单，到点恢复 Idle
+// 27c. 升品锁车：期间 Maintenance 不可派单，到点恢复 Idle（S2a：蓝规格门槛 = 10 单 + 300km）
 const lockV = qs.garage.vehicles[0];
 lockV.ordersCompleted = GAME_CONSTANTS.QUALITY_BLUE_REQUIRED_ORDERS;
+lockV.mileage = GAME_CONSTANTS.QUALITY_BLUE_REQUIRED_MILEAGE;
 qs.resources.gold = 10_000_000;
 qs.resources.parts = 1_000_000;
 const qOrderSys = new OrderSystem(qs);
 const lockOrder: import('../src/core/types').Order = {
-  id: 'o_lock', type: OrderType.Normal, tier: 1, baseReward: 10, expReward: 20, duration: 30,
+  id: 'o_lock', type: OrderType.Normal, tier: 1, baseReward: 10, duration: 30,
   assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
 };
 qs.orders.push(lockOrder);
@@ -558,7 +668,7 @@ ev1.trait = null;
 ev1.stats.speed = 5;
 const pushOrder = (id: string, type: OrderType, tier = 1): void => {
   es.orders.push({
-    id, type, tier, baseReward: 10, expReward: 20, duration: 30,
+    id, type, tier, baseReward: 10, duration: 30,
     requiredQuality: type === OrderType.Valuable ? Quality.Blue : undefined,
     assignedVehicleId: null, status: OrderStatus.Pending, createdAt: Date.now(), expiresAt: Date.now() + 120000,
   });
@@ -633,7 +743,7 @@ es.activeEvents.length = 0; // 手动结束冷却
 check('冷却结束可再营销', eOrder.runMarketing());
 es.activeEvents.length = 0;
 
-// 28g. 升级规格耗电：经济型→标准型 20⚡ / 标准型→工业型 80⚡
+// 28g. 升级规格耗电：经济型→标准型 20⚡ / 标准型→工业型 80⚡（S2a：里程门槛 300km/1500km）
 const qs2 = SaveManager.createInitialState();
 const q2Vehicle = new VehicleSystem(qs2);
 q2Vehicle.debugInstantBuild = true;
@@ -642,11 +752,14 @@ qs2.resources.parts = 100_000;
 const qv = q2Vehicle.createVehicle(1)!;
 qv.trait = null;
 qv.ordersCompleted = GAME_CONSTANTS.QUALITY_BLUE_REQUIRED_ORDERS;
+check('里程不足升品（蓝）被拒', !q2Vehicle.upgradeQuality(qv.id));
+qv.mileage = GAME_CONSTANTS.QUALITY_BLUE_REQUIRED_MILEAGE;
 qs2.resources.energy = GAME_CONSTANTS.ENERGY_QUALITY_BLUE - 1;
 check('能源不足升品（蓝）被拒', !q2Vehicle.upgradeQuality(qv.id));
 qs2.resources.energy = GAME_CONSTANTS.ENERGY_QUALITY_BLUE;
 check('升品（蓝）扣 20⚡', q2Vehicle.upgradeQuality(qv.id) && qs2.resources.energy === 0);
-qv.level = GAME_CONSTANTS.QUALITY_GOLD_REQUIRED_LEVEL;
+check('里程不足升品（金）被拒', !q2Vehicle.upgradeQuality(qv.id));
+qv.mileage = GAME_CONSTANTS.QUALITY_GOLD_REQUIRED_MILEAGE;
 qs2.resources.energy = GAME_CONSTANTS.ENERGY_QUALITY_GOLD - 1;
 check('能源不足升品（金）被拒', !q2Vehicle.upgradeQuality(qv.id));
 qs2.resources.energy = GAME_CONSTANTS.ENERGY_QUALITY_GOLD;
@@ -899,12 +1012,12 @@ check('L5 队列满后再造被拒', qVehicle30.createVehicle(1) === null);
 
 // 30j. 支线 3 阶总效果 ≥ 原一次性效果
 check('物流优化 3 阶 ≥ 原效果', 1 - 0.07 * 3 <= 0.8 + 1e-9);
-check('技术档案 3 阶 ≥ 原效果', 0.06 * 3 >= 0.15);
+check('技术档案 3 阶出售残值 +21%', Math.abs(0.07 * 3 - 0.21) < 1e-9);
 check('回收工艺 3 阶 ≥ 原效果', 0.3 + 0.07 * 3 >= 0.5);
 check('支线阶数查询', getSideTechRank(us, 'lean_mfg') === 0);
 
 // 31. 以旧换新（tradeIn）：差价净扣 / 与拆解+手动造车同口径 / 满库允许 / 拒绝场景
-// 造一辆带 50 经验的 T1 旧车（T2 已解锁），供各断言组复用
+// 造一辆 T1 旧车（T2 已解锁），供各断言组复用（S2a：回收走残值口径，新车里程 0 → 残值 = 实付价）
 const mkTradeState = () => {
   const st = SaveManager.createInitialState();
   st.resources.gold = 1000;
@@ -915,17 +1028,17 @@ const mkTradeState = () => {
   vs.debugInstantBuild = true;
   const old = vs.createVehicle(1)!; // T1：-10🪙 -5⚡
   old.trait = null;                 // 排除出厂参数传承随机性
-  vs.addExp(old.id, 50);            // 带点经验，验证传承池口径
   return { st, vs, old };
 };
 
-// 31a. 净扣差价 + 与「直接拆解 + 手动造车」账目一致（金币/零件/能源/传承/新车等级）
+// 31a. 净扣差价 + 与「直接拆解 + 手动造车」账目一致（金币/零件/能源）
 {
   const A = mkTradeState();
   const goldA0 = A.st.resources.gold;
   const quoteA = A.vs.getTradeInQuote(A.old.id, 2);
   check('置换报价可用', quoteA.ok, quoteA.reason);
-  // T1 回收金币 floor(10×0.3)=3；T2 成本 28🪙 → 差价 25
+  // T1 残值 10（里程 0 磨损 0）→ 回收金币 floor(10×0.3)=3；T2 成本 28🪙 → 差价 25
+  check('置换报价显示残值 10', quoteA.residual === 10, `residual=${quoteA.residual}`);
   check('置换差价 = 28-3 = 25', quoteA.goldDiff === 25, `diff=${quoteA.goldDiff}`);
   check('置换执行成功', A.vs.tradeIn(A.old.id, 2).ok);
   check('置换金币净扣差价', A.st.resources.gold === goldA0 - 25,
@@ -939,9 +1052,6 @@ const mkTradeState = () => {
     `A=${A.st.resources.gold} B=${B.st.resources.gold}`);
   check('置换与拆解+造车零件一致', A.st.resources.parts === B.st.resources.parts);
   check('置换与拆解+造车能源一致', A.st.resources.energy === B.st.resources.energy);
-  check('置换与拆解+造车传承池一致', A.st.garage.inheritanceExp === B.st.garage.inheritanceExp);
-  check('置换新车继承经验一致',
-    A.st.garage.vehicles.find(x => x.tier === 2)!.level === B.st.garage.vehicles.find(x => x.tier === 2)!.level);
 }
 
 // 31b. 车库满时置换允许而普通建造禁止（拆解先腾 1 格，净效果 0）

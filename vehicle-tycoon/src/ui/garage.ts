@@ -3,20 +3,29 @@
 // ============================================================
 
 import { Vehicle, Quality, TraitType, VehicleStats, Specialization } from '../core/types';
-import { getVehicleConfig, getUnmetRequirements, VEHICLE_CONFIGS } from '../config/VehicleConfig';
-import { GAME_CONSTANTS, statUpgradeCost } from '../config/GameConstants';
+import { getVehicleConfig, getUnmetRequirements, VEHICLE_CONFIGS, getParkingSpaces } from '../config/VehicleConfig';
+import { GAME_CONSTANTS, statUpgradeCost, getBreakinBonus, getMileageLifespan } from '../config/GameConstants';
 import { getState, getSystems, requestRender } from './context';
 import { getTraitName, getTraitDesc, getQualityLabel } from './format';
+import { getUpgradeMult } from '../systems/UpgradeSystem';
+import { getSellPrice } from '../systems/VehicleSystem';
 import { showModal, hideModal } from './modal';
 import { showToast } from './toast';
 import { addLog } from './log';
+
+/** 里程显示：1234km → 1.2k */
+function fmtMileage(mileage: number): string {
+  return mileage >= 1000 ? `${(mileage / 1000).toFixed(1)}k` : `${Math.floor(mileage)}`;
+}
 
 // ==================== 车库渲染 ====================
 
 export function renderGarage(): void {
   const s = getState();
-  document.getElementById('garage-count')!.textContent = s.garage.vehicles.length.toString();
-  document.getElementById('garage-max')!.textContent = s.garage.maxCapacity.toString();
+  // 车库标题（S2a 占格数口径）：现有车辆 parkingSpaces 之和 / 容量
+  const used = s.garage.vehicles.reduce((sum, v) => sum + getParkingSpaces(v.tier), 0);
+  document.getElementById('garage-count')!.textContent = used.toString();
+  document.getElementById('garage-max')!.textContent = `${s.garage.maxCapacity}格`;
 
   const grid = document.getElementById('garage-grid')!;
   grid.innerHTML = '';
@@ -47,12 +56,19 @@ export function renderGarage(): void {
         ? `⬆ 升级中 ${upgradeRemain}s`
         : '🚚 派单中';
     const traitName = getTraitName(v.trait);
-    const maxLv = vehicleSys.getMaxLevel(v.quality);
     const SPEC_ICONS: Record<string, string> = { express: '⚡快运', heavy: '💪重载', steady: '🛡️耐用' };
     const specText = v.specialization ? ` · ${SPEC_ICONS[v.specialization]}` : '';
     const wearWarning = v.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD
       ? '<div style="text-align:center;color:var(--red);font-size:11px;font-weight:700;">🔧 磨损严重，收入-30%</div>'
       : '';
+    // S2a：里程 / 占格 / 残值（低残值红色警示：残值不足实付价 20%）
+    const spaces = getParkingSpaces(v.tier);
+    const residual = vehicleSys.getResidual(v.id);
+    const paidCost = Math.floor((config?.buildCost ?? 0) * getUpgradeMult(s, 'build_cost'));
+    const lowResidual = paidCost > 0 && residual < paidCost * 0.2;
+    const residualHtml = lowResidual
+      ? `<div class="info" style="color:var(--red);font-weight:700;">💰 残值 ${residual.toLocaleString()}🪙 ⬇</div>`
+      : `<div class="info">💰 残值 ${residual.toLocaleString()}🪙</div>`;
 
     card.innerHTML = `
       <span class="tier-badge">T${v.tier}</span>
@@ -60,9 +76,10 @@ export function renderGarage(): void {
       <div class="emoji">${config?.emoji || '🚗'}</div>
       <div class="name">${v.name}</div>
       <div style="text-align:center;font-size:10px;color:var(--text-3);font-weight:700;">${config?.name || ''}</div>
-      <div style="text-align:center;margin:4px 0;">
-        Lv.${v.level}/${maxLv}
+      <div style="text-align:center;margin:4px 0;font-size:11px;color:var(--text-2);font-weight:700;">
+        🛞 ${fmtMileage(v.mileage)} km · 占${spaces}格
       </div>
+      ${residualHtml}
       <div class="info">${traitName}${specText} ${v.trait === TraitType.Lucky ? '<span class="badge rare">稀有</span>' : ''}</div>
       <div class="info">📦${v.ordersCompleted}单</div>
       ${wearWarning}
@@ -78,12 +95,11 @@ export function renderGarage(): void {
 export function showVehicleDetail(v: Vehicle): void {
   const sys = getSystems();
   const config = getVehicleConfig(v.tier);
-  const maxLv = sys.vehicleSys.getMaxLevel(v.quality);
 
   const SPEC_INFO: Record<string, { icon: string; name: string; desc: string }> = {
     express: { icon: '⚡', name: '快运', desc: '耗时 -25%，收入 -10%' },
     heavy: { icon: '💪', name: '重载', desc: '收入 +25%，耗时 +15%' },
-    steady: { icon: '🛡️', name: '耐用', desc: '磨损减半，经验 +15%' },
+    steady: { icon: '🛡️', name: '耐用', desc: '磨损减半，磨合增速 +15%' },
   };
   const specLine = v.specialization
     ? `<p>🎯 运营配置: ${SPEC_INFO[v.specialization].icon}${SPEC_INFO[v.specialization].name}（${SPEC_INFO[v.specialization].desc}）</p>`
@@ -91,13 +107,25 @@ export function showVehicleDetail(v: Vehicle): void {
   const wearColor = v.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD ? 'var(--red)' : 'var(--text-2)';
   const wearLine = `<p style="color:${wearColor};">🔧 磨损 ${Math.floor(v.wear)}/100${v.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD ? '（收入-30% 耗时+20%，快检修！）' : ''} · 😮‍💨 连单 ${v.consecutiveOrders}（越多收入越低，空闲30秒恢复）</p>`;
 
+  // S2a 资产档案：里程 / 车龄 / 磨合 / 残值 / 翻新次数
+  const lifespan = getMileageLifespan(v.tier);
+  const breakinPct = Math.round(getBreakinBonus(v.mileage) * 100);
+  const ageMin = Math.max(0, Math.floor((Date.now() - v.createdAt) / 60000));
+  const residual = sys.vehicleSys.getResidual(v.id);
+  const paidCost = Math.floor((config?.buildCost ?? 0) * getUpgradeMult(getState(), 'build_cost'));
+  const lowResidual = paidCost > 0 && residual < paidCost * 0.2;
+  const residualLine = `<p style="${lowResidual ? 'color:var(--red);font-weight:700;' : ''}">💰 当前残值 ${residual.toLocaleString()}🪙（实付 ${paidCost.toLocaleString()}🪙）${lowResidual ? ' ⬇ 高折旧，考虑出售/置换' : ''}</p>`;
+
   const detail = `
-    <p>${config?.emoji} <strong>${v.name}</strong> · T${v.tier} ${config?.name || ''}</p>
-    <p>📊 Lv.${v.level}/${maxLv} | 规格: ${getQualityLabel(v.quality)}</p>
+    <p>${config?.emoji} <strong>${v.name}</strong> · T${v.tier} ${config?.name || ''} · 占${getParkingSpaces(v.tier)}格</p>
+    <p>📊 规格: ${getQualityLabel(v.quality)}</p>
+    <p>🛞 里程 ${fmtMileage(v.mileage)}/${fmtMileage(lifespan)} km（寿命 ${fmtMileage(lifespan)}km）· 磨合 +${breakinPct}%（上限 +40%）</p>
+    <p>⏱️ 车龄：运行 ${ageMin} 分钟 · 🔁 翻新 ${v.refurbishCount}/${GAME_CONSTANTS.REFURBISH_MAX_COUNT} 次</p>
+    ${residualLine}
     <p>🧬 出厂参数: ${getTraitName(v.trait)}${getTraitDesc(v.trait) ? `（${getTraitDesc(v.trait)}）` : ''} ${v.trait === TraitType.Lucky ? '🔥稀有' : ''}</p>
     ${specLine}
     ${wearLine}
-    <p>🏎️速度 ${v.stats.speed}/5（耗时-4%/级）· 📦载货 ${v.stats.cargo}/5（收入+4%/级）· 🔩耐久 ${v.stats.durability}/5（≥3 可接🏔️长途单）</p>
+    <p>🏎️速度 ${v.stats.speed}/5（耗时-4%/级）· 📦载货 ${v.stats.cargo}/5（收入+4%/级）· 🔩耐久 ${v.stats.durability}/5（≥3 可接🏔️长途单 · 每单磨损-8%/级）</p>
     <p>📦 ${v.ordersCompleted}单 · 🪙 ${v.totalEarnings.toLocaleString()}</p>
     <p>${v.status === 'idle' ? '✅ 空闲' : v.status === 'maintenance' ? `⬆ 规格升级中，剩余 ${Math.max(0, Math.ceil(((v.qualityUpgrade?.finishAt ?? 0) - Date.now()) / 1000))}s` : '🚚 执行订单中'}</p>
   `;
@@ -120,17 +148,50 @@ export function showVehicleDetail(v: Vehicle): void {
     });
   }
 
-  // ---------- 检修（消耗零件，只清磨损，有冷却） ----------
+  // ---------- 检修（消耗零件，只清磨损，有冷却；S2a 成本随里程浮动） ----------
   const overhaulCd = sys.vehicleSys.getOverhaulCooldownRemaining(v.id);
-  buttons.push(overhaulCd > 0 ? `🔧 检修(${Math.ceil(overhaulCd / 60)}分钟)` : `🔧 检修·清磨损(${GAME_CONSTANTS.OVERHAUL_PARTS_COST}⚙️)`, () => {
+  const overhaulCost = sys.vehicleSys.getOverhaulCost(v.id);
+  buttons.push(overhaulCd > 0 ? `🔧 检修(${Math.ceil(overhaulCd / 60)}分钟)` : `🔧 检修·清磨损(${overhaulCost}⚙️)`, () => {
     if (sys.vehicleSys.overhaul(v.id)) {
-      addLog(`🔧 检修了 ${v.name}，磨损已清零（-${GAME_CONSTANTS.OVERHAUL_PARTS_COST}⚙️）`);
+      addLog(`🔧 检修了 ${v.name}，磨损已清零（-${overhaulCost}⚙️）`);
     } else {
-      addLog(`🔧 检修冷却中或零件不足（需要 ${GAME_CONSTANTS.OVERHAUL_PARTS_COST}⚙️）`);
+      addLog(`🔧 检修冷却中或零件不足（需要 ${overhaulCost}⚙️）`);
     }
     showVehicleDetail(v); // 重开弹窗刷新冷却/数值
     requestRender();
   });
+
+  // ---------- 翻新（S2a：磨损清零 + 里程×0.4 折旧回春，每车限 2 次） ----------
+  if (v.status === 'idle' && v.refurbishCount < GAME_CONSTANTS.REFURBISH_MAX_COUNT) {
+    const rc = sys.vehicleSys.getRefurbishCost(v.id);
+    if (rc) {
+      buttons.push(`✨ 翻新 (${rc.gold.toLocaleString()}🪙+${rc.parts}⚙️ · ${v.refurbishCount}/${GAME_CONSTANTS.REFURBISH_MAX_COUNT})`, () => {
+        if (sys.vehicleSys.refurbish(v.id)) {
+          addLog(`✨ 翻新了 ${v.name}：磨损清零，里程回春（-${rc.gold.toLocaleString()}🪙 -${rc.parts}⚙️）`);
+          showToast('✨ 翻新完成', `${v.name} 折旧回春，残值回升`);
+        } else {
+          addLog(`❌ 翻新条件不足（需空闲 + ${rc.gold.toLocaleString()}🪙 + ${rc.parts}⚙️）`);
+        }
+        showVehicleDetail(v);
+        requestRender();
+      });
+    }
+  }
+
+  // ---------- 出售（S2a：残值金币，无零件；与拆解二选一） ----------
+  if (v.status === 'idle') {
+    const sellPrice = getSellPrice(getState(), v);
+    buttons.push(`💰 出售 (+${sellPrice.toLocaleString()}🪙)`, () => {
+      const got = sys.vehicleSys.sellVehicle(v.id);
+      if (got > 0) {
+        addLog(`💰 出售了 ${v.name}，回收残值 +${got.toLocaleString()}🪙`);
+        hideModal();
+      } else {
+        addLog(`❌ 出售失败（车辆不存在或正在派单）`);
+      }
+      requestRender();
+    });
+  }
 
   // ---------- 属性升级（速度/载货/耐久） ----------
   const statDefs: Array<{ key: keyof VehicleStats; emoji: string; name: string }> = [
@@ -199,7 +260,7 @@ export function showVehicleDetail(v: Vehicle): void {
   // ---------- 拆解 ----------
   buttons.push('🔧 拆解', () => {
     const result = sys.vehicleSys.scrapVehicle(v.id);
-    addLog(`🔧 ${v.name} 已拆解，回收 ${result.parts}⚙️ · 🧬传承经验 +${result.inheritedExp}（下一辆新车继承）`);
+    addLog(`🔧 ${v.name} 已拆解，回收 ${result.parts}⚙️ + ${result.gold.toLocaleString()}🪙（残值口径）`);
     hideModal();
     requestRender();
   });
@@ -278,13 +339,12 @@ function showTradeInModal(v: Vehicle): void {
       return;
     }
 
-    const inheritLine = q.inheritedExp > 0 ? `（传承池 +${q.inheritedExp.toLocaleString()} 经验）` : '';
     const diffShort = q.goldDiff - state.resources.gold; // 还差多少（正数=不够）
     const diffLine = diffShort > 0
       ? `<p style="color:var(--red);font-weight:700;">💰 实际需补：-${q.goldDiff.toLocaleString()}🪙（还差 ${diffShort.toLocaleString()}🪙）</p>`
       : `<p>💰 实际需补：-${q.goldDiff.toLocaleString()}🪙</p>`;
     quoteBox.innerHTML = `
-      <p>♻️ 旧车回收（${oldConfig?.emoji}${oldConfig?.name}）：+${q.scrapParts.toLocaleString()}⚙️ +${q.scrapGold.toLocaleString()}🪙${inheritLine}</p>
+      <p>♻️ 旧车回收（${oldConfig?.emoji}${oldConfig?.name}，残值 ${q.residual.toLocaleString()}🪙）：+${q.scrapParts.toLocaleString()}⚙️ +${q.scrapGold.toLocaleString()}🪙</p>
       <p>🏭 新车成本（${newConfig.emoji}${newConfig.name}）：-${q.buildGold.toLocaleString()}🪙 -${q.buildParts.toLocaleString()}⚙️ -${q.buildEnergy.toLocaleString()}⚡</p>
       ${diffLine}
       <p>⏱️ 建造耗时：${q.buildTime}s（建完自动进车库）</p>

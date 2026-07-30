@@ -86,10 +86,10 @@ export class AchievementSystem {
       reward: { gold: 1500, parts: 150 },
     },
     {
-      id: 'inherit_5',
-      name: '薪火相传',
-      description: '传承 5 次（新车继承拆解经验）',
-      condition: { type: 'inherit_count', target: 5 },
+      id: 'refurbish_2',
+      name: '焕然一新',
+      description: '累计翻新 2 次（折旧回春，老车第二春）',
+      condition: { type: 'refurbish_count', target: 2 },
       reward: { gold: 2000, parts: 200 },
     },
     {
@@ -173,8 +173,8 @@ export class AchievementSystem {
       case 'factory_level':
         return this.state.factory.level >= condition.target;
 
-      case 'inherit_count':
-        return this.state.stats.totalVehiclesInherited >= condition.target;
+      case 'refurbish_count':
+        return this.state.stats.totalRefurbishes >= condition.target;
 
       case 'side_tech_count':
         return Object.values(this.state.techTree.sideTechs).filter(n => n > 0).length >= condition.target;
@@ -230,7 +230,7 @@ export class AchievementSystem {
       case 'total_orders': current = this.state.stats.totalOrdersCompleted; break;
       case 'tech_level': current = this.state.techTree.currentLevel; break;
       case 'factory_level': current = this.state.factory.level; break;
-      case 'inherit_count': current = this.state.stats.totalVehiclesInherited; break;
+      case 'refurbish_count': current = this.state.stats.totalRefurbishes; break;
       case 'side_tech_count':
         current = Object.values(this.state.techTree.sideTechs).filter(n => n > 0).length;
         break;

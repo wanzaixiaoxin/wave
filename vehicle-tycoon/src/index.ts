@@ -15,7 +15,7 @@ export * from './core/types';
 export { VEHICLE_CONFIGS, getVehicleConfig, getUnlockedConfigs, getUnmetRequirements } from './config/VehicleConfig';
 export { TECH_CONFIGS, getTechConfig } from './config/TechConfig';
 export { TRAIT_CONFIGS, rollTrait, getTraitConfig } from './config/TraitConfig';
-export { GAME_CONSTANTS, expForLevel, cumulativeExpForLevel, statUpgradeCost, garageExpandCost } from './config/GameConstants';
+export { GAME_CONSTANTS, getBreakinBonus, getMileageLifespan, overhaulPartsCost, statUpgradeCost, garageExpandCost } from './config/GameConstants';
 
 // 系统
 export { VehicleSystem } from './systems/VehicleSystem';

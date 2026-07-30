@@ -22,7 +22,7 @@ export function getTraitDesc(trait: TraitType | null): string {
     case 'speed': return '订单耗时 -15%';
     case 'cargo': return '收入 +20%';
     case 'crit_rate': return '暴击率 +5%';
-    case 'exp': return '经验 +20%';
+    case 'breakin': return '磨合增速 +20%';
     case 'income': return '收入 +10%';
     case 'crit_mult': return '暴击 ×3';
     default: return '';

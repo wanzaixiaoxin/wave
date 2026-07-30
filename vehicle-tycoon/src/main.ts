@@ -7,7 +7,7 @@ import { GameLoop } from './core/GameLoop';
 import { EventBus } from './core/EventBus';
 import { SaveManager } from './core/SaveManager';
 import { GameEvent, GameState, Vehicle, Order, OfflineResult } from './core/types';
-import { getVehicleConfig, getUnmetRequirements } from './config/VehicleConfig';
+import { getVehicleConfig, getUnmetRequirements, getOccupiedSpaces } from './config/VehicleConfig';
 import { GAME_CONSTANTS, buildEnergyCost } from './config/GameConstants';
 import { getEnRouteEventConfig } from './config/EnRouteEventConfig';
 import { getBuildQueueMax } from './systems/FactorySystem';
@@ -101,7 +101,7 @@ function renderAll(): void {
 
 function bindEvents(): void {
   const events = [
-    GameEvent.VEHICLE_PRODUCED, GameEvent.VEHICLE_LEVEL_UP,
+    GameEvent.VEHICLE_PRODUCED,
     GameEvent.VEHICLE_RETIRED,
     GameEvent.ORDER_COMPLETED, GameEvent.ACHIEVEMENT_UNLOCKED,
     GameEvent.GARAGE_EXPANDED, GameEvent.FACTORY_UPGRADED,
@@ -122,7 +122,7 @@ function bindEvents(): void {
         showFloatingGold(reward, isCrit);
         if (isCrit) showCritEffect(critMult);
         goldBounce();
-        showToast(`✅ ${name} 完成订单`, `+${reward}🪙 +${o.expReward}经验${isCrit ? ' 💥暴击' : ''}`);
+        showToast(`✅ ${name} 完成订单`, `+${reward}🪙${isCrit ? ' 💥暴击' : ''}`);
         addLog(`✅ ${name} 完成订单 +${reward}🪙${isCrit ? '（暴击！）' : ''}`);
         break;
       }
@@ -131,17 +131,8 @@ function bindEvents(): void {
         const cfg = getVehicleConfig(v.tier);
         // 车辆名称在落地时自动生成（车型名 + #编号）
         addLog(`🚗 新车出厂！${cfg?.emoji} ${v.name} [${getTraitName(v.trait)}]`);
-        if (v.level > 1) {
-          addLog(`🧬 传承生效！${cfg?.name} 起步就是 Lv.${v.level}`);
-        }
         showToast(`🚗 新车出厂！`, `${cfg?.emoji} ${v.name} · ${getTraitName(v.trait)}`);
         setTimeout(() => addLog('💡 等几秒订单刷新后，点击「派车」让它去赚钱'), 2000);
-        break;
-      }
-      case GameEvent.VEHICLE_LEVEL_UP: {
-        const v = args[0] as Vehicle;
-        showToast(`⬆ ${v.name} 升级！`, `现在 Lv.${v.level}，收入提升`);
-        addLog(`⬆ ${v.name} 升到 Lv.${v.level}！`);
         break;
       }
       case GameEvent.RANDOM_EVENT_TRIGGERED: {
@@ -232,8 +223,8 @@ function bindUI(): void {
       addLog(`❌ T${tier} ${cfg.name} 还未解锁：${unmet.join(' · ')}`);
       return;
     }
-    // 预留未来车位：现有 + 建造中 + 排队 占满则禁止入队
-    if (s.garage.vehicles.length + s.garage.buildQueue.length >= s.garage.maxCapacity) {
+    // 预留未来车位（S2a 占格数口径）：现有 + 建造中 + 排队 占满则禁止入队
+    if (getOccupiedSpaces(s) + cfg.parkingSpaces > s.garage.maxCapacity) {
       addLog(`❌ 车库已满（${s.garage.maxCapacity} 格，含建造中的车），请先扩建或送走一辆车`);
       return;
     }
@@ -273,7 +264,7 @@ function bindUI(): void {
     } else {
       const state = getState();
       if (state.garage.maxCapacity >= GAME_CONSTANTS.GARAGE_MAX_CAPACITY) {
-        addLog('🏠 车库已到最大容量（12 格）');
+        addLog(`🏠 车库已到最大容量（${GAME_CONSTANTS.GARAGE_MAX_CAPACITY} 格）`);
       } else {
         addLog(`❌ 金币不足，扩建需要 ${ec.getNextExpandCost()}🪙`);
       }

@@ -33,8 +33,8 @@ export const TRAIT_CONFIGS: TraitConfigEntry[] = [
     type: TraitType.Smart,
     name: '老练',
     rarity: TraitRarity.Normal,
-    effectType: 'exp',
-    effectValue: 1.20,     // 经验 ×1.20
+    effectType: 'breakin',
+    effectValue: 1.20,     // 磨合增速 ×1.20（S2a：原经验加成改磨合）
     probability: 0.17,
   },
   {

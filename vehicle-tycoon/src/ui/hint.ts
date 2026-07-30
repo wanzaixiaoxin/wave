@@ -5,7 +5,7 @@
 // ============================================================
 
 import { GameState, Quality, qualityRank } from '../core/types';
-import { getUnlockedConfigs } from '../config/VehicleConfig';
+import { getUnlockedConfigs, getOccupiedSpaces } from '../config/VehicleConfig';
 import { getTechConfig } from '../config/TechConfig';
 import { getState, getSystems } from './context';
 import { isTutorialActive } from './tutorial';
@@ -56,14 +56,15 @@ export function computeHint(state: GameState, nextTech: NextTechInfo | null): Hi
     };
   }
 
-  // 2. 车库已满或差 1 格满 → 切车库 Tab（扩建/拆解）
-  const free = state.garage.maxCapacity - vehicles.length;
+  // 2. 车库已满或差 1 格满（S2a 占格数口径，含建造队列预留） → 切车库 Tab（扩建/拆解）
+  const used = getOccupiedSpaces(state);
+  const free = state.garage.maxCapacity - used;
   if (free <= 1 && state.garage.maxCapacity > 0) {
     return {
       icon: '🏠',
       text: free <= 0
-        ? `车库已满（${vehicles.length}/${state.garage.maxCapacity}），扩建或拆解旧车腾位置`
-        : `车库只剩 1 格（${vehicles.length}/${state.garage.maxCapacity}），记得扩建或拆解旧车`,
+        ? `车库已满（${used}/${state.garage.maxCapacity}格），扩建或拆解旧车腾位置`
+        : `车库只剩 1 格（${used}/${state.garage.maxCapacity}格），记得扩建或拆解旧车`,
       action: { type: 'tab', tab: 'garage' },
     };
   }

@@ -10,7 +10,7 @@ import { EconomySystem, getGlobalIncomeMult } from '../systems/EconomySystem';
 import { getUpgradeMult } from '../systems/UpgradeSystem';
 
 const SAVE_KEY = 'tycoon_save_v1';
-const SAVE_VERSION = '2.0'; // 2.0：纯经营转型 S0（删命名/亲密度/进化/Prestige/Challenge）；老档不迁移，版本不匹配直接开新局
+const SAVE_VERSION = '2.1'; // 2.1：纯经营转型 S2a（删等级/经验/传承池，里程+残值资产曲线）；老档不迁移，版本不匹配直接开新局
 const MAX_OFFLINE_SECONDS = 2 * 3600; // 2 hours
 const OFFLINE_EFFICIENCY = 0.4;
 
@@ -172,7 +172,6 @@ export class SaveManager {
       garage: {
         maxCapacity: 6,
         vehicles: [],
-        inheritanceExp: 0,
         buildQueue: [],
       },
       factory: {
@@ -201,7 +200,7 @@ export class SaveManager {
         totalVehiclesProduced: 0,
         totalOrdersCompleted: 0,
         totalTradeIns: 0,
-        totalVehiclesInherited: 0,
+        totalRefurbishes: 0,
         totalPlayTime: 0,
         offlineTime: 0,
       },

@@ -148,7 +148,6 @@ export class OrderSystem {
     if (!config) return;
 
     let baseReward: number;
-    let expReward: number;
     let duration: number;
     let requiredDurability: number | undefined;
     let requiredQuality: Quality | undefined;
@@ -156,18 +155,15 @@ export class OrderSystem {
     switch (type) {
       case OrderType.Normal:
         baseReward = config.basePrice;
-        expReward = GAME_CONSTANTS.ORDER_NORMAL_EXP_BASE;
         duration = GAME_CONSTANTS.ORDER_NORMAL_DURATION;
         break;
       case OrderType.LongDistance:
         baseReward = config.basePrice * 2;
-        expReward = GAME_CONSTANTS.ORDER_NORMAL_EXP_BASE * GAME_CONSTANTS.ORDER_LONG_DIST_EXP_MULT;
         duration = GAME_CONSTANTS.ORDER_LONG_DIST_DURATION;
         requiredDurability = 3;
         break;
       case OrderType.Valuable:
         baseReward = config.basePrice * 3;
-        expReward = GAME_CONSTANTS.ORDER_NORMAL_EXP_BASE * GAME_CONSTANTS.ORDER_VALUABLE_EXP_MULT;
         duration = GAME_CONSTANTS.ORDER_VALUABLE_DURATION;
         requiredQuality = Quality.Blue;
         break;
@@ -181,7 +177,6 @@ export class OrderSystem {
       type,
       tier: baseTier,
       baseReward: Math.floor(baseReward * rewardMult),
-      expReward,
       duration,
       requiredDurability,
       requiredQuality,
@@ -264,6 +259,7 @@ export class OrderSystem {
     duration *= getUpgradeMult(this.state, 'order_duration');
     const departAt = Date.now();
     vehicle.statusEndAt = departAt + duration * 1000;
+    order.assignedAt = departAt; // S2a：结算时按实际耗时累积里程
 
     // 路上事件（M1）：按概率排定一个途中事件（普通/贵重 40%、长途 70%），
     // 触发点在行程 30%-70% 之间的随机时刻
@@ -442,8 +438,7 @@ export class OrderSystem {
         getUpgradeMult(this.state, 'rep_gain')
       );
 
-      // 经验由 VehicleSystem 监听 ORDER_COMPLETED 后统一走 addExp() 处理
-      // （含出厂参数/规格加成与升级判定），此处不再直接累加
+      // 里程由 VehicleSystem 监听 ORDER_COMPLETED 后统一累积（S2a 替代经验体系）
       vehicle.ordersCompleted++;
       vehicle.totalEarnings += totalReward;
 
@@ -459,9 +454,10 @@ export class OrderSystem {
       vehicle.status = VehicleStatus.Idle;
       vehicle.statusEndAt = 0;
 
-      // 磨损累积（耐用运营配置减半；质控体系子科技 v1.3 统一乘区逐阶 -10%）与疲劳计数
+      // 磨损累积（耐用运营配置减半；耐久属性每级 -8%（S2a）；质控体系子科技 v1.3 统一乘区逐阶 -10%）与疲劳计数
       const wearGain = GAME_CONSTANTS.WEAR_PER_ORDER *
         (vehicle.specialization === Specialization.Steady ? GAME_CONSTANTS.SPEC_STEADY_WEAR_MULT : 1) *
+        (1 - vehicle.stats.durability * GAME_CONSTANTS.DURABILITY_WEAR_PER_LEVEL) *
         getUpgradeMult(this.state, 'wear');
       vehicle.wear = Math.min(GAME_CONSTANTS.WEAR_MAX, vehicle.wear + wearGain);
       vehicle.consecutiveOrders++;

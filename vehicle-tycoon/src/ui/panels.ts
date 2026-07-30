@@ -3,7 +3,7 @@
 // ============================================================
 
 import { getState, getSystems, requestRender } from './context';
-import { VEHICLE_CONFIGS, getVehicleConfig, getUnmetRequirements } from '../config/VehicleConfig';
+import { VEHICLE_CONFIGS, getVehicleConfig, getUnmetRequirements, getOccupiedSpaces, getParkingSpaces } from '../config/VehicleConfig';
 import { TECH_CONFIGS, SIDE_TECH_CONFIGS } from '../config/TechConfig';
 import { getSubTechsOfLevel, RETROFIT_CONFIGS } from '../config/UpgradeConfig';
 import { GAME_CONSTANTS, buildEnergyCost } from '../config/GameConstants';
@@ -50,9 +50,6 @@ export function renderTopBar(): void {
 
   const ec = getSystems().economySys;
   document.getElementById('eps')!.textContent = `${ec.getEstimatedEPS()}/s`;
-
-  const poolEl = document.getElementById('inherit-pool');
-  if (poolEl) poolEl.textContent = Math.floor(s.garage.inheritanceExp).toLocaleString();
 }
 
 export function updateStatusIcons(): void {
@@ -107,13 +104,14 @@ export function renderWorkbench(): void {
   const box = document.getElementById('build-status');
   const btn = document.getElementById('btn-build') as HTMLButtonElement | null;
 
-  // 建造槽/队列满，或车位（含预留）满 → 禁用制造按钮；
+  // 建造槽/队列满，或车位（含预留，S2a 占格数口径）满 → 禁用制造按钮；
   // 选中车型未解锁（M9 矩阵）/能源不足（M8）→ 同样置灰并给出原因
   const queueFull = queue.length >= 1 + getBuildQueueMax(s);
-  const reservedFull = s.garage.vehicles.length + queue.length >= s.garage.maxCapacity;
   const selectedTier = parseInt(
     (document.getElementById('build-tier-select') as HTMLSelectElement | null)?.value ?? '0'
   );
+  const selectedSpaces = selectedTier > 0 ? getParkingSpaces(selectedTier) : 0;
+  const reservedFull = getOccupiedSpaces(s) + selectedSpaces > s.garage.maxCapacity;
   const unmet = selectedTier > 0 ? getUnmetRequirements(s, selectedTier) : [];
   const locked = unmet.length > 0;
   const energyShort = selectedTier > 0 && s.resources.energy < buildEnergyCost(selectedTier);

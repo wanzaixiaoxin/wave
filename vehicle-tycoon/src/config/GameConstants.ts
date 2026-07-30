@@ -3,64 +3,66 @@
 // ============================================================
 
 export const GAME_CONSTANTS = {
-  // ===== 等级 =====
-  MAX_VEHICLE_LEVEL: 10,
-  EXP_BASE: 35,
-  EXP_GROWTH: 1.5,          // 每级所需经验 = 35 × 1.5^(level-1)
-
   // ===== 规格 =====
-  QUALITY_WHITE_MAX_LEVEL: 5,
-  QUALITY_BLUE_MAX_LEVEL: 8,
-  QUALITY_GOLD_MAX_LEVEL: 10,
   QUALITY_BLUE_COST_GOLD: 500,
   QUALITY_BLUE_COST_PARTS: 20,
   QUALITY_BLUE_REQUIRED_ORDERS: 10,
+  QUALITY_BLUE_REQUIRED_MILEAGE: 300,   // S2a：标准型里程门槛（原等级门槛改里程）
   QUALITY_GOLD_COST_GOLD: 5000,
   QUALITY_GOLD_COST_PARTS: 100,
-  QUALITY_GOLD_REQUIRED_LEVEL: 7,
+  QUALITY_GOLD_REQUIRED_MILEAGE: 1500,  // S2a：工业型里程门槛（原 Lv.7 门槛改里程）
 
   QUALITY_INCOME_MULT_WHITE: 1.0,
   QUALITY_INCOME_MULT_BLUE: 1.5,
   QUALITY_INCOME_MULT_GOLD: 2.0,
 
-  QUALITY_EXP_MULT_WHITE: 0,
-  QUALITY_EXP_MULT_BLUE: 0.5,
-  QUALITY_EXP_MULT_GOLD: 1.5,
+  // ===== 里程与磨合（S2a：替代等级/经验） =====
+  MILEAGE_SPEED_BASE: 5,         // 完成订单里程 = 实际耗时(秒) × (5 + tier)
+  BREAKIN_PER_1000KM: 0.04,      // 磨合：每 1000km 收入 +4%
+  BREAKIN_MAX: 0.40,             // 磨合收入加成上限 +40%
+
+  // ===== 残值（S2a） =====
+  MILEAGE_LIFESPAN_PER_TIER: 3000,  // 里程寿命 = 3000 × tier（T1 3000km，T10 30000km）
+  RESIDUAL_MIN_RATIO: 0.15,         // 残值下限：实付价 × 15%
+  RESIDUAL_WEAR_FACTOR: 200,        // 磨损折旧：残值 × (1 - wear/200)
+  SCRAP_GOLD_RESIDUAL_BASE: 0.3,    // 拆解金币 = 残值 × (0.3 + 回收工艺加成)
+
+  // ===== 翻新（S2a） =====
+  REFURBISH_GOLD_RATIO: 0.35,    // 翻新金币 = floor(buildCost × 0.35)
+  REFURBISH_PARTS_RATIO: 0.5,    // 翻新零件 = floor(partsCost × 0.5)
+  REFURBISH_MILEAGE_MULT: 0.4,   // 翻新后里程 ×0.4（折旧回春）
+  REFURBISH_MAX_COUNT: 2,        // 每车限翻新 2 次
 
   // ===== 属性升级 =====
   STAT_MAX_LEVEL: 5,
   STAT_UPGRADE_COST_BASE: 50,
   STAT_UPGRADE_COST_GROWTH: 2.0,  // 每级 ×2
 
-  // ===== 车库 =====
+  // ===== 车库（S2a：占格数口径，容量 = 各车 parkingSpaces 之和的上限） =====
   GARAGE_INITIAL_CAPACITY: 6,
-  GARAGE_MAX_CAPACITY: 12,
+  GARAGE_MAX_CAPACITY: 18,   // S2a：大车占 2-4 格，上限 18 格保住车队组合取舍（≈6 辆中车或 4 辆大车）
   GARAGE_EXPAND_COST_BASE: 500,
   GARAGE_EXPAND_COST_GROWTH: 3.0,
+  GARAGE_EXPAND_SPACES: 3,   // 每次扩建 +3 格
 
   // ===== 订单 =====
   ORDER_NORMAL_DURATION: 30,     // 秒
   ORDER_LONG_DIST_DURATION: 45,
   ORDER_VALUABLE_DURATION: 60,
   ORDER_EXPIRE_TIME: 120,        // 订单过期时间（秒）
-  ORDER_NORMAL_EXP_BASE: 20,
-  ORDER_LONG_DIST_EXP_MULT: 2.0,
-  ORDER_VALUABLE_EXP_MULT: 3.0,
 
   // ===== 检修 =====
-  OVERHAUL_PARTS_COST: 2,       // 检修零件消耗
+  OVERHAUL_PARTS_COST: 2,       // 检修基础零件消耗（S2a：随里程浮动，每 2000km +1⚙️）
+  OVERHAUL_PARTS_PER_2000KM: 1, // 里程每满 2000km 检修零件 +1
   OVERHAUL_COOLDOWN: 300,       // 检修冷却（秒）
-
-  // ===== 经验 =====
-  EXP_PER_ORDER_BASE: 10,
 
   // ===== 继承概率 =====
   TRAIT_INHERIT_CHANCE: 0.25,
-  INHERIT_EXP_RATIO: 0.5,           // 拆解时累计经验存入传承池的比例（下一辆新车继承）
 
   // ===== 属性成长 =====
   CARGO_INCOME_PER_LEVEL: 0.04,    // 载货属性每级收入 +4%
   SPEED_DURATION_PER_LEVEL: 0.04,  // 速度属性每级订单耗时 -4%
+  DURABILITY_WEAR_PER_LEVEL: 0.08, // 耐久属性每级每单磨损 -8%（S2a：5 级 -40%，修复 3 级后零收益）
 
   // ===== 磨损与疲劳（经营卡点 + 抗膨胀） =====
   WEAR_PER_ORDER: 5,               // 每完成 1 单磨损 +5
@@ -77,7 +79,7 @@ export const GAME_CONSTANTS = {
   SPEC_EXPRESS_INCOME_MULT: 0.9,    // 快运：收入 ×0.9
   SPEC_HEAVY_INCOME_MULT: 1.25,     // 重载：收入 ×1.25
   SPEC_HEAVY_DURATION_MULT: 1.15,   // 重载：耗时 ×1.15
-  SPEC_STEADY_EXP_MULT: 1.15,       // 耐用：经验 ×1.15
+  SPEC_STEADY_BREAKIN_MULT: 1.15,   // 耐用：磨合增速 ×1.15（S2a：原经验加成改磨合）
   SPEC_STEADY_WEAR_MULT: 0.5,       // 耐用：磨损减半
 
   // ===== 暴击 =====
@@ -110,8 +112,8 @@ export const GAME_CONSTANTS = {
   // ===== 辅助科技（支线）效果（v1.3：3 阶制，效果 = 每阶量 × 阶数） =====
   SIDE_LOGISTICS_INTERVAL_PER_RANK: 0.07, // 物流优化：订单生成间隔每阶 -7%（3 阶 -21% ≈ 原 ×0.8）
   SIDE_LEAN_PARTS_PER_RANK: 0.09,         // 精益制造：造车零件消耗每阶 -9%（3 阶 -27% ≈ 原 ×0.75）
-  SIDE_ARCHIVE_INHERIT_PER_RANK: 0.06,    // 技术档案：传承比例每阶 +6 个百分点（3 阶 +18% ≥ 原 15%）
-  SIDE_RECYCLING_SCRAP_PER_RANK: 0.07,    // 回收工艺：拆解金币返还每阶 +7%（3 阶 51% ≥ 原 50%）
+  SIDE_ARCHIVE_RESIDUAL_PER_RANK: 0.07, // 技术档案（S2a 改残值体系）：出售残值金币每阶 +7%
+  SIDE_RECYCLING_SCRAP_PER_RANK: 0.07,  // 回收工艺：拆解金币返还每阶 +7%（乘在残值上）
 
   // ===== 工厂里程碑（v1.3） =====
   FACTORY_QUEUE_BONUS_LEVEL: 5,  // 工厂达到该等级时建造排队位 +1（3→4）
@@ -154,21 +156,24 @@ export const GAME_CONSTANTS = {
 };
 
 /**
- * 计算第 N 级所需经验
+ * 磨合收入加成（S2a）：每 1000km +4%，上限 +40%（替代原「每级 +5%」）
  */
-export function expForLevel(level: number): number {
-  return Math.floor(GAME_CONSTANTS.EXP_BASE * Math.pow(GAME_CONSTANTS.EXP_GROWTH, level - 1));
+export function getBreakinBonus(mileage: number): number {
+  return Math.min(
+    GAME_CONSTANTS.BREAKIN_MAX,
+    (mileage / 1000) * GAME_CONSTANTS.BREAKIN_PER_1000KM
+  );
 }
 
-/**
- * 计算从 1 级升到 targetLevel 的累计经验
- */
-export function cumulativeExpForLevel(targetLevel: number): number {
-  let total = 0;
-  for (let i = 1; i < targetLevel; i++) {
-    total += expForLevel(i);
-  }
-  return total;
+/** 里程寿命（S2a）：3000 × tier（T1 小车 3000km 报废期，T10 30000km） */
+export function getMileageLifespan(tier: number): number {
+  return GAME_CONSTANTS.MILEAGE_LIFESPAN_PER_TIER * tier;
+}
+
+/** 检修零件成本（S2a）：基础 2⚙️ + 里程每满 2000km +1⚙️（老车检修更贵） */
+export function overhaulPartsCost(mileage: number): number {
+  return GAME_CONSTANTS.OVERHAUL_PARTS_COST +
+    Math.floor(mileage / 2000) * GAME_CONSTANTS.OVERHAUL_PARTS_PER_2000KM;
 }
 
 /**

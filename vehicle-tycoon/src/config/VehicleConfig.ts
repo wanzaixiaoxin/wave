@@ -176,3 +176,23 @@ export function getUnmetRequirements(state: GameState, tier: number): string[] {
 export function getUnlockedConfigs(state: GameState): VehicleConfigEntry[] {
   return VEHICLE_CONFIGS.filter(c => getUnmetRequirements(state, c.tier).length === 0);
 }
+
+/**
+ * 车库当前占格数（S2a 占格数口径）：现有车辆 parkingSpaces 之和 + 建造队列预留。
+ * 容量判定（建造入队 / 以旧换新 / 扩建提示）统一走这里，单一数据源。
+ */
+export function getOccupiedSpaces(state: GameState): number {
+  let used = 0;
+  for (const v of state.garage.vehicles) {
+    used += getVehicleConfig(v.tier)?.parkingSpaces ?? 1;
+  }
+  for (const j of state.garage.buildQueue) {
+    used += getVehicleConfig(j.tier)?.parkingSpaces ?? 1;
+  }
+  return used;
+}
+
+/** 单车型占格数（缺省 1 格） */
+export function getParkingSpaces(tier: number): number {
+  return getVehicleConfig(tier)?.parkingSpaces ?? 1;
+}

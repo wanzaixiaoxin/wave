@@ -6,8 +6,9 @@ import { EventBus } from '../core/EventBus';
 import { GameEvent, GameState, Vehicle, Quality, OrderType, Specialization } from '../core/types';
 import { getVehicleConfig } from '../config/VehicleConfig';
 import { getTraitConfig } from '../config/TraitConfig';
-import { GAME_CONSTANTS, garageExpandCost } from '../config/GameConstants';
+import { GAME_CONSTANTS, garageExpandCost, getBreakinBonus } from '../config/GameConstants';
 import { getEventMultiplier } from './EventSystem';
+import { getResidualValue } from './VehicleSystem';
 
 /**
  * 科技 L5 全厂收入倍率（唯一实现，OrderSystem / EconomySystem 共用）
@@ -24,7 +25,9 @@ export class EconomySystem {
 
   constructor(state: GameState) {
     this.state = state;
-    this.expandCount = Math.floor((state.garage.maxCapacity - GAME_CONSTANTS.GARAGE_INITIAL_CAPACITY) / 2);
+    this.expandCount = Math.floor(
+      (state.garage.maxCapacity - GAME_CONSTANTS.GARAGE_INITIAL_CAPACITY) / GAME_CONSTANTS.GARAGE_EXPAND_SPACES
+    );
   }
 
   // ==================== 车库扩建 ====================
@@ -36,7 +39,7 @@ export class EconomySystem {
     if (this.state.resources.gold < cost) return false;
 
     this.state.resources.gold -= cost;
-    this.state.garage.maxCapacity += 2;
+    this.state.garage.maxCapacity += GAME_CONSTANTS.GARAGE_EXPAND_SPACES;
     this.expandCount++;
 
     EventBus.emit(GameEvent.GARAGE_EXPANDED, this.state.garage.maxCapacity);
@@ -65,7 +68,8 @@ export class EconomySystem {
     state?: GameState,
     orderType?: OrderType
   ): { income: number; isCrit: boolean; critMult: number } {
-    const levelMult = 1 + vehicle.level * 0.05;
+    // 磨合加成（S2a）：替代原「每级 +5%」——每 1000km +4%，上限 +40%
+    const breakinMult = 1 + getBreakinBonus(vehicle.mileage);
 
     let qualityMult: number;
     switch (vehicle.quality) {
@@ -74,7 +78,7 @@ export class EconomySystem {
       case Quality.Gold: qualityMult = GAME_CONSTANTS.QUALITY_INCOME_MULT_GOLD; break;
     }
 
-    let income = Math.floor(basePrice * levelMult * qualityMult * orderTypeMult * globalMult);
+    let income = Math.floor(basePrice * breakinMult * qualityMult * orderTypeMult * globalMult);
 
     // 出厂参数加成（节能）
     if (vehicle.trait) {
@@ -167,16 +171,13 @@ export class EconomySystem {
   }
 
   /**
-   * 获取总资产
+   * 获取总资产（S2a：车辆按当前残值计入，随里程/磨损折旧）
    */
   getNetWorth(): number {
     let worth = this.state.resources.gold;
 
     for (const v of this.state.garage.vehicles) {
-      const config = getVehicleConfig(v.tier);
-      if (config) {
-        worth += Math.floor(config.basePrice * (1 + v.level * 0.1));
-      }
+      worth += getResidualValue(this.state, v);
     }
 
     return worth;

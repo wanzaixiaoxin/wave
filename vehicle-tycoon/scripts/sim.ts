@@ -18,10 +18,12 @@ import { FactorySystem } from '../src/systems/FactorySystem';
 import { TechSystem } from '../src/systems/TechSystem';
 import { EconomySystem } from '../src/systems/EconomySystem';
 import { EventBus } from '../src/core/EventBus';
-import { GameEvent, Order, Vehicle } from '../src/core/types';
-import { getUnlockedConfigs, getVehicleConfig } from '../src/config/VehicleConfig';
+import { GameEvent, Order, Vehicle, VehicleStatus } from '../src/core/types';
+import { getUnlockedConfigs, getVehicleConfig, getOccupiedSpaces } from '../src/config/VehicleConfig';
 import { getEnRouteEventConfig } from '../src/config/EnRouteEventConfig';
-import { buildEnergyCost, GAME_CONSTANTS } from '../src/config/GameConstants';
+import { buildEnergyCost, GAME_CONSTANTS, getMileageLifespan } from '../src/config/GameConstants';
+import { getResidualValue } from '../src/systems/VehicleSystem';
+import { getUpgradeMult } from '../src/systems/UpgradeSystem';
 import { SUB_TECH_CONFIGS, RETROFIT_CONFIGS } from '../src/config/UpgradeConfig';
 import { SIDE_TECH_CONFIGS, getTechConfig } from '../src/config/TechConfig';
 
@@ -88,7 +90,7 @@ function readRes(key: ResKey): number {
 const initialRes: Record<ResKey, number> = { gold: readRes('gold'), parts: readRes('parts'), energy: readRes('energy'), rep: readRes('rep') };
 
 // ---- 决策密度：每个成功动作计数，按 10 分钟分段 ----
-const ACTION_KEYS = ['造车入队', '主线研究', '子科技', '支线', '改造', '升规格', '置换', '电站升级', '工厂升级', '营销', '超负荷'] as const;
+const ACTION_KEYS = ['造车入队', '主线研究', '子科技', '支线', '改造', '升规格', '置换', '出售', '翻新', '电站升级', '工厂升级', '营销', '超负荷'] as const;
 type ActionKey = typeof ACTION_KEYS[number];
 const zeroActions = (): Record<ActionKey, number> =>
   Object.fromEntries(ACTION_KEYS.map(k => [k, 0])) as Record<ActionKey, number>;
@@ -252,18 +254,41 @@ for (let t = 0; t < SIM_SECONDS; t++) {
     }
   }
 
-  // 4. 检修磨损车（只清磨损）
+  // 4. 检修磨损车（只清磨损；S2a 成本随里程浮动）
   for (const v of state.garage.vehicles) {
-    if (v.wear >= 70 && state.resources.parts >= 2) vehicleSys.overhaul(v.id);
+    if (v.wear >= 70 && state.resources.parts >= vehicleSys.getOverhaulCost(v.id)) vehicleSys.overhaul(v.id);
+  }
+
+  // 4b. 资产处置（S2a）：残值驱动的翻新/出售决策
+  // 翻新优先：残值 <50% 实付价且还有翻新次数、金币富余（3 倍费用缓冲）→ 折旧回春
+  // 出售兜底：残值 <20% 实付价且里程 >70% 寿命（翻新次数已用尽）→ 卖旧换新车
+  // （金币需够直接补一辆同级新车，避免卖空车队断收入）
+  for (const v of [...state.garage.vehicles]) {
+    const cfg = getVehicleConfig(v.tier);
+    if (!cfg) continue;
+    const paid = Math.floor(cfg.buildCost * getUpgradeMult(state, 'build_cost'));
+    if (paid <= 0) continue;
+    const residual = getResidualValue(state, v);
+    const lifespan = getMileageLifespan(v.tier);
+    if (residual < paid * 0.5 && v.refurbishCount < GAME_CONSTANTS.REFURBISH_MAX_COUNT) {
+      const rc = vehicleSys.getRefurbishCost(v.id);
+      if (rc && state.resources.gold >= rc.gold * 3 && state.resources.parts >= rc.parts) {
+        if (vehicleSys.refurbish(v.id)) { act('翻新', t); continue; }
+      }
+    }
+    if (residual < paid * 0.2 && v.mileage > lifespan * 0.7
+      && state.resources.gold >= cfg.buildCost * 1.2) {
+      if (vehicleSys.sellVehicle(v.id) > 0) act('出售', t);
+    }
   }
 
   // 5. 造车：新 tier 必买（升级时刻）；资金充裕时补充/更新车队（含解锁条件的产量打磨）
-  // M7：建造入队后占「未来车位」，车队规模按 现有 + 建造中/排队 计算
+  // M7：建造入队后占「未来车位」；S2a：车队规模按占格数（parkingSpaces）计算，含建造中/排队预留
   // M9：解锁判定走时代差异化矩阵（含科技/工厂/电站/声望/产量），叠加能源预算
   const unlocked = getUnlockedConfigs(state);
   const topTier = state.garage.vehicles.length > 0
     ? Math.max(...state.garage.vehicles.map(v => v.tier)) : 0;
-  const reservedSize = state.garage.vehicles.length + state.garage.buildQueue.length;
+  const reservedSpaces = getOccupiedSpaces(state);
   const candidates = unlocked.filter(c => {
     if (state.resources.energy < buildEnergyCost(c.tier)) return false;        // M8 能源预算
     if (state.resources.parts < c.partsCost) return false;
@@ -273,21 +298,35 @@ for (let t = 0; t < SIM_SECONDS; t++) {
   const best = candidates[candidates.length - 1];
   if (best) {
     let canBuild = true;
-    if (reservedSize >= state.garage.maxCapacity) {
-      // 卡点④：车库满，且扩不起（或已扩到上限）、也无法以旧换新
+    if (reservedSpaces + best.parkingSpaces > state.garage.maxCapacity) {
+      // 卡点④：车库满，且扩不起（或已扩到上限）、也无法以旧换新/卖车腾格
       const expandCost = economySys.getNextExpandCost();
       const canExpand = expandCost > 0 && state.resources.gold >= expandCost;
-      const lowest = [...state.garage.vehicles].sort((a, b) => a.tier - b.tier)[0];
-      const canTrade = lowest !== undefined && lowest.tier < best.tier && state.garage.buildQueue.length < 2;
-      if (!canExpand && !canTrade) garageBlocked = true;
+      // S2a 占格口径：置换能否成立取决于旧车腾出格数，需逐辆试报价
+      const tradeCandidates = [...state.garage.vehicles]
+        .sort((a, b) => a.tier - b.tier)
+        .filter(v => v.tier < best.tier && state.garage.buildQueue.length < 2);
+      const tradeTarget = tradeCandidates.find(v => vehicleSys.getTradeInQuote(v.id, best.tier).ok);
+      const lowest = tradeCandidates[0];
+      if (!canExpand && !tradeTarget && !lowest) garageBlocked = true;
 
-      // 车库满：优先扩建；扩不了且能换更高 tier 的车时走以旧换新（拆解+入队一步完成，
-      // 拆解腾位净效果 0，满库也允许；队列 ≥2 时不动，避免金币锁死在排队车辆上）
+      // 车库满：优先扩建；扩不了时置换——从低 tier 起找第一辆报价可用
+      // （占格/资源/队列均满足）的旧车；置换不成则处理最低 tier 旧车腾格：
+      // 空闲→出售（残值全价无零件），在途→拆解（与置换同一经济口径，拆解随时可用）。
+      // 目标车占格大于旧车腾出格时一次腾不够，下一 tick 继续，直到新车能入队。
+      // （队列 ≥2 时不动，避免金币锁死在排队车辆上）
       if (!economySys.expandGarage()) {
-        if (canTrade) {
-          if (vehicleSys.tradeIn(lowest!.id, best.tier).ok) act('置换', t);
+        if (tradeTarget) {
+          if (vehicleSys.tradeIn(tradeTarget.id, best.tier).ok) act('置换', t);
+        } else if (lowest) {
+          if (lowest.status === VehicleStatus.Idle) {
+            if (vehicleSys.sellVehicle(lowest.id) > 0) act('出售', t);
+          } else {
+            vehicleSys.scrapVehicle(lowest.id);
+            act('置换', t);
+          }
         }
-        canBuild = false; // 满库场景只走置换；同级拆建纯亏钱，攒钱等下一档
+        canBuild = false; // 满库场景只走置换/出售；同级拆建纯亏钱，攒钱等下一档
       }
     }
     // 卡点②：想造车但建造队列被占满（贪心策略上限 2，避免金币锁死在排队车辆上）

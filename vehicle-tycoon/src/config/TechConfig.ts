@@ -90,14 +90,14 @@ export const SIDE_TECH_CONFIGS: SideTechConfigEntry[] = [
   {
     id: 'archive',
     name: '技术档案',
-    description: '拆解传承比例每阶 +6%',
+    description: '出售残值金币每阶 +7%',
     requiredLevel: 3,
     maxRank: 3,
-    effectKey: 'inherit_ratio',
-    valuePerRank: GAME_CONSTANTS.SIDE_ARCHIVE_INHERIT_PER_RANK,
+    effectKey: 'residual_value',
+    valuePerRank: GAME_CONSTANTS.SIDE_ARCHIVE_RESIDUAL_PER_RANK,
     goldCosts: [12000, 24000, 48000],
     partsCosts: [200, 400, 800],
-    effect: '传承比例 50% + 6%×阶数',
+    effect: '出售残值 +7%×阶数（S2a 残值体系）',
   },
   {
     id: 'recycling',
@@ -109,7 +109,7 @@ export const SIDE_TECH_CONFIGS: SideTechConfigEntry[] = [
     valuePerRank: GAME_CONSTANTS.SIDE_RECYCLING_SCRAP_PER_RANK,
     goldCosts: [15000, 30000, 60000],
     partsCosts: [250, 500, 1000],
-    effect: '拆解金币返还 30% + 7%×阶数',
+    effect: '拆解金币返还 = 残值 × (30% + 7%×阶数)',
   },
 ];
 
