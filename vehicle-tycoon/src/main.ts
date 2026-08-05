@@ -26,7 +26,7 @@ import { renderOrders } from './ui/orders';
 import { renderHint } from './ui/hint';
 import {
   renderTopBar, updateStatusIcons, buildTierOptions, renderWorkbench,
-  renderFactory, renderTech, renderAchievements,
+  renderFactory, renderTech, renderAchievements, getBuildTierSelection,
 } from './ui/panels';
 
 // ==================== 状态 ====================
@@ -212,7 +212,7 @@ function bindEvents(): void {
 
 function bindUI(): void {
   document.getElementById('btn-build')!.onclick = () => {
-    const tier = parseInt((document.getElementById('build-tier-select') as HTMLSelectElement).value);
+    const tier = getBuildTierSelection();
     const s = getState();
     const cfg = getVehicleConfig(tier);
     if (!cfg) return;
@@ -315,29 +315,28 @@ function bindUI(): void {
     requestRender();
   };
 
+  // 底部导航：切 Tab = 面板占据主区域；「车库」Tab 恢复主页面（车库+订单同屏）
+  const showTab = (tab: string): void => {
+    currentTab = tab;
+    document.querySelectorAll('#bottombar button').forEach(b =>
+      b.classList.toggle('active', b.getAttribute('data-tab') === tab));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('visible'));
+    const home = document.getElementById('main-home');
+    const panel = document.getElementById('panel-' + tab);
+    const isPanel = !!panel;
+    if (home) home.classList.toggle('hidden', isPanel);
+    if (panel) panel.classList.add('visible');
+    requestRender();
+  };
+
   document.querySelectorAll('#bottombar button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#bottombar button').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      document.querySelectorAll('.panel').forEach(p => p.classList.remove('visible'));
-      const tab = btn.getAttribute('data-tab')!;
-      currentTab = tab;
-      const panel = document.getElementById('panel-' + tab);
-      if (panel) panel.classList.add('visible');
-      requestRender();
-    });
+    btn.addEventListener('click', () => showTab(btn.getAttribute('data-tab')!));
   });
 
   // 顶栏车辆状态图标点击切回车库
   document.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
-    if (target.closest('#vehicle-status-icons')) {
-      document.querySelectorAll('#bottombar button').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.panel').forEach(p => p.classList.remove('visible'));
-      const garageBtn = document.querySelector('[data-tab="garage"]') as HTMLElement;
-      if (garageBtn) { garageBtn.classList.add('active'); currentTab = 'garage'; }
-      requestRender();
-    }
+    if (target.closest('#vehicle-status-icons')) showTab('garage');
   });
 
   document.getElementById('btn-upgrade-factory')!.onclick = () => {

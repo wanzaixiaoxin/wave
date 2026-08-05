@@ -10,6 +10,7 @@ import { getTraitName, getTraitDesc, getQualityLabel } from './format';
 import { getUpgradeMult } from '../systems/UpgradeSystem';
 import { getSellPrice } from '../systems/VehicleSystem';
 import { showModal, hideModal } from './modal';
+import { renderPills, PillOption } from './pills';
 import { showToast } from './toast';
 import { addLog } from './log';
 
@@ -18,7 +19,26 @@ function fmtMileage(mileage: number): string {
   return mileage >= 1000 ? `${(mileage / 1000).toFixed(1)}k` : `${Math.floor(mileage)}`;
 }
 
+/** 金额短格式：1234 → 1.2k，1234567 → 1.2M（卡片单行放得下） */
+function fmtMoney(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return `${Math.floor(n)}`;
+}
+
 // ==================== 车库渲染 ====================
+
+/** 车位格列数：每行 6 格（对应初始容量 6，S2a 占格数口径） */
+const LOT_COLS = 6;
+
+/** 空车位：喷漆虚线框 + 车位号 */
+function createParkingSlot(no: number, col: number): HTMLElement {
+  const slot = document.createElement('div');
+  slot.className = 'parking-slot';
+  slot.style.gridColumn = `${col}`;
+  slot.innerHTML = `<span class="slot-no">${no}</span>`;
+  return slot;
+}
 
 export function renderGarage(): void {
   const s = getState();
@@ -30,64 +50,77 @@ export function renderGarage(): void {
   const grid = document.getElementById('garage-grid')!;
   grid.innerHTML = '';
 
-  if (s.garage.vehicles.length === 0) {
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:30px;font-size:14px;">🅿️ 车库是空的<br><span style="font-size:12px;">🏭工厂产⚙️ → 🔧消耗⚙️+🪙造车 → 📮跑单赚🪙</span></div>';
-    return;
+  const vehicles = s.garage.vehicles;
+  let pos = 0; // 全局占位游标（0 起，车位号 = pos+1）
+
+  // 本行剩余列补空车位，让放不下的车换行停放
+  const padRow = (): void => {
+    while (pos % LOT_COLS !== 0) {
+      const col = (pos % LOT_COLS) + 1;
+      grid.appendChild(createParkingSlot(pos + 1, col));
+      pos++;
+    }
+  };
+
+  if (vehicles.length === 0) {
+    const msg = document.createElement('div');
+    msg.className = 'garage-empty';
+    msg.innerHTML = '🅿️ 车库是空的<br><span>🏭工厂产⚙️ → 🔧消耗⚙️+🪙造车 → 📮跑单赚🪙</span>';
+    grid.appendChild(msg);
+  } else {
+    for (const v of vehicles) {
+      const span = getParkingSpaces(v.tier);
+      if (pos % LOT_COLS + span > LOT_COLS) padRow(); // 本行放不下 → 先画满本行空位再换行
+      const col = (pos % LOT_COLS) + 1;
+      grid.appendChild(createVehicleCard(v, col, span));
+      pos += span;
+    }
   }
 
+  // 补齐剩余空车位（到容量上限，车位号连续）
+  while (pos < s.garage.maxCapacity) {
+    const col = (pos % LOT_COLS) + 1;
+    grid.appendChild(createParkingSlot(pos + 1, col));
+    pos++;
+  }
+}
+
+/** 车辆迷你卡片：大图标 + 名称 + 单行摘要（里程/残值）+ 状态圆点；详情进弹窗 */
+function createVehicleCard(v: Vehicle, col: number, span: number): HTMLElement {
+  const s = getState();
   const vehicleSys = getSystems().vehicleSys;
+  const config = getVehicleConfig(v.tier);
+  const card = document.createElement('div');
+  card.className = `vehicle-card quality-${v.quality} span-${span}`;
+  card.style.gridColumn = `${col} / ${col + span}`;
 
-  s.garage.vehicles.forEach(v => {
-    const config = getVehicleConfig(v.tier);
-    const card = document.createElement('div');
-    card.className = `vehicle-card quality-${v.quality}`;
+  // 规格角标
+  const badge = v.quality === 'gold' ? '<span class="quality-badge gold-badge">工业</span>'
+    : v.quality === 'blue' ? '<span class="quality-badge blue-badge">标准</span>' : '';
 
-    // 规格角标
-    const badge = v.quality === 'gold' ? '<span class="quality-badge gold-badge">工业</span>'
-      : v.quality === 'blue' ? '<span class="quality-badge blue-badge">标准</span>' : '';
+  // 状态圆点：空闲绿 / 派单橙 / 升级中紫
+  const dotClass = v.status === 'idle' ? 'idle' : v.status === 'maintenance' ? 'maintenance' : 'busy';
+  const statusText = v.status === 'idle'
+    ? '✅ 空闲'
+    : v.status === 'maintenance'
+      ? `⬆ 规格升级中 ${Math.max(0, Math.ceil(((v.qualityUpgrade?.finishAt ?? 0) - Date.now()) / 1000))}s`
+      : '🚚 派单中';
 
-    const statusClass = v.status === 'idle' ? 'idle' : 'busy';
-    const upgradeRemain = v.qualityUpgrade
-      ? Math.max(0, Math.ceil((v.qualityUpgrade.finishAt - Date.now()) / 1000))
-      : 0;
-    const statusText = v.status === 'idle'
-      ? '✅ 空闲'
-      : v.status === 'maintenance'
-        ? `⬆ 升级中 ${upgradeRemain}s`
-        : '🚚 派单中';
-    const traitName = getTraitName(v.trait);
-    const SPEC_ICONS: Record<string, string> = { express: '⚡快运', heavy: '💪重载', steady: '🛡️耐用' };
-    const specText = v.specialization ? ` · ${SPEC_ICONS[v.specialization]}` : '';
-    const wearWarning = v.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD
-      ? '<div style="text-align:center;color:var(--red);font-size:11px;font-weight:700;">🔧 磨损严重，收入-30%</div>'
-      : '';
-    // S2a：里程 / 占格 / 残值（低残值红色警示：残值不足实付价 20%）
-    const spaces = getParkingSpaces(v.tier);
-    const residual = vehicleSys.getResidual(v.id);
-    const paidCost = Math.floor((config?.buildCost ?? 0) * getUpgradeMult(s, 'build_cost'));
-    const lowResidual = paidCost > 0 && residual < paidCost * 0.2;
-    const residualHtml = lowResidual
-      ? `<div class="info" style="color:var(--red);font-weight:700;">💰 残值 ${residual.toLocaleString()}🪙 ⬇</div>`
-      : `<div class="info">💰 残值 ${residual.toLocaleString()}🪙</div>`;
+  // 单行摘要：里程 + 残值（低残值红色警示）
+  const residual = vehicleSys.getResidual(v.id);
+  const paidCost = Math.floor((config?.buildCost ?? 0) * getUpgradeMult(s, 'build_cost'));
+  const lowResidual = paidCost > 0 && residual < paidCost * 0.2;
 
-    card.innerHTML = `
-      <span class="tier-badge">T${v.tier}</span>
-      ${badge}
-      <div class="emoji">${config?.emoji || '🚗'}</div>
-      <div class="name">${v.name}</div>
-      <div style="text-align:center;font-size:10px;color:var(--text-3);font-weight:700;">${config?.name || ''}</div>
-      <div style="text-align:center;margin:4px 0;font-size:11px;color:var(--text-2);font-weight:700;">
-        🛞 ${fmtMileage(v.mileage)} km · 占${spaces}格
-      </div>
-      ${residualHtml}
-      <div class="info">${traitName}${specText} ${v.trait === TraitType.Lucky ? '<span class="badge rare">稀有</span>' : ''}</div>
-      <div class="info">📦${v.ordersCompleted}单</div>
-      ${wearWarning}
-      <div style="text-align:center;margin-top:4px;"><span class="status-badge ${statusClass}">${statusText}</span></div>
-    `;
-    card.onclick = () => showVehicleDetail(v);
-    grid.appendChild(card);
-  });
+  card.innerHTML = `
+    <span class="tier-badge">T${v.tier}</span>
+    ${badge}
+    <div class="emoji">${config?.emoji || '🚗'}</div>
+    <div class="name">${v.name}</div>
+    <div class="card-line ${lowResidual ? 'residual-low' : ''}" title="里程 / 当前残值">🛞 ${fmtMileage(v.mileage)} · 💰 ${fmtMoney(residual)}</div>
+    <span class="status-dot ${dotClass}" title="${statusText}"></span>
+  `;
+  card.onclick = () => showVehicleDetail(v);
+  return card;
 }
 
 // ==================== 车辆详情弹窗 ====================
@@ -301,17 +334,16 @@ function showTradeInModal(v: Vehicle): void {
     return;
   }
 
-  // 目标车型下拉：默认选中 tier+1（否则列表第一项）
-  const select = document.createElement('select');
-  select.className = 'dispatch-select';
-  for (const c of targets) {
-    const opt = document.createElement('option');
-    opt.value = c.tier.toString();
-    opt.textContent = `${c.emoji} T${c.tier} ${c.name}`;
-    select.appendChild(opt);
-  }
-  select.value = (targets.find(c => c.tier === v.tier + 1) ?? targets[0]).tier.toString();
-  content.appendChild(select);
+  // 目标车型胶囊：默认选中 tier+1（否则列表第一项），点击即选即刷新报价
+  let selTier: string = (targets.find(c => c.tier === v.tier + 1) ?? targets[0]).tier.toString();
+  const pillRow = document.createElement('div');
+  const pillOpts: PillOption[] = targets.map(c => ({
+    value: c.tier.toString(),
+    emoji: c.emoji,
+    label: `${c.name} · T${c.tier}`,
+  }));
+  renderPills(pillRow, pillOpts, selTier, (val) => { selTier = val; renderQuote(); });
+  content.appendChild(pillRow);
 
   const quoteBox = document.createElement('div');
   content.appendChild(quoteBox);
@@ -328,8 +360,14 @@ function showTradeInModal(v: Vehicle): void {
 
   // 实时清单：旧车回收 / 新车成本 / 实际需补 / 建造耗时
   const renderQuote = (): void => {
-    const newTier = parseInt(select.value, 10);
-    const newConfig = getVehicleConfig(newTier)!;
+    const newTier = parseInt(selTier, 10);
+    const newConfig = getVehicleConfig(newTier);
+    if (!newConfig) {
+      quoteBox.innerHTML = '<p style="color:var(--red);font-weight:700;">❌ 请选择目标车型</p>';
+      confirmBtn.textContent = '🔁 确认置换';
+      confirmBtn.disabled = true;
+      return;
+    }
     const q = sys.vehicleSys.getTradeInQuote(v.id, newTier);
 
     if (!q.ok) {
@@ -352,13 +390,14 @@ function showTradeInModal(v: Vehicle): void {
     confirmBtn.textContent = diffShort > 0 ? '🔁 金币不足' : '🔁 确认置换';
     confirmBtn.disabled = diffShort > 0;
   };
-  select.onchange = renderQuote;
+
   renderQuote();
 
   confirmBtn.onclick = (e) => {
     e.stopPropagation();
-    const newTier = parseInt(select.value, 10);
-    const newConfig = getVehicleConfig(newTier)!;
+    const newTier = parseInt(selTier, 10);
+    const newConfig = getVehicleConfig(newTier);
+    if (!newConfig) return;
     const q = sys.vehicleSys.getTradeInQuote(v.id, newTier);
     const res = sys.vehicleSys.tradeIn(v.id, newTier);
     overlay.classList.remove('visible');

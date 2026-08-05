@@ -3,12 +3,14 @@
 // ============================================================
 
 import { getState, getSystems, requestRender } from './context';
+import { GameState } from '../core/types';
 import { VEHICLE_CONFIGS, getVehicleConfig, getUnmetRequirements, getOccupiedSpaces, getParkingSpaces } from '../config/VehicleConfig';
 import { TECH_CONFIGS, SIDE_TECH_CONFIGS } from '../config/TechConfig';
 import { getSubTechsOfLevel, RETROFIT_CONFIGS } from '../config/UpgradeConfig';
 import { GAME_CONSTANTS, buildEnergyCost } from '../config/GameConstants';
 import { getBuildQueueMax } from '../systems/FactorySystem';
 import { getUpgradeMult } from '../systems/UpgradeSystem';
+import { renderPills, PillOption } from './pills';
 import { showToast } from './toast';
 import { addLog } from './log';
 
@@ -64,36 +66,100 @@ export function updateStatusIcons(): void {
   }
 }
 
-// ==================== 造车下拉 ====================
+// ==================== 造车选择（胶囊直选，非下拉） ====================
+
+let lastBuildTier: string | null = null;
+
+/** 当前是否买得起某 tier（金币/零件/能源全维度，与 createVehicle 同口径） */
+function canAffordBuild(s: GameState, tier: number): boolean {
+  const cfg = getVehicleConfig(tier);
+  if (!cfg) return false;
+  return s.resources.gold >= Math.floor(cfg.buildCost * getUpgradeMult(s, 'build_cost'))
+    && s.resources.parts >= cfg.partsCost
+    && s.resources.energy >= buildEnergyCost(tier);
+}
 
 export function buildTierOptions(): void {
-  const select = document.getElementById('build-tier-select') as HTMLSelectElement;
-  if (!select) return;
-
-  const prevValue = select.value; // 重建后恢复选中项，避免刷新把选择冲掉
-  select.innerHTML = '';
+  const container = document.getElementById('build-tier-select');
+  if (!container) return;
 
   const s = getState();
-  // 全量列出车型：未解锁的置灰并展示全部缺失条件（M9 时代差异化矩阵）
-  VEHICLE_CONFIGS.forEach(cfg => {
-    const opt = document.createElement('option');
-    opt.value = cfg.tier.toString();
-    const unmet = getUnmetRequirements(s, cfg.tier);
-    if (unmet.length > 0) {
-      opt.disabled = true;
-      opt.textContent = `${cfg.emoji} ${cfg.name} 🔒 ${unmet.join(' · ')}`;
-    } else {
-      const partsStr = cfg.partsCost > 0 ? ` + ${cfg.partsCost}⚙️` : '';
-      // v1.3：显示统一乘区后的实际造价（批量采购/精益生产）
-      const effCost = Math.floor(cfg.buildCost * getUpgradeMult(s, 'build_cost'));
-      opt.textContent = `${cfg.emoji} ${cfg.name} (${effCost.toLocaleString()}🪙${partsStr} + ${buildEnergyCost(cfg.tier)}⚡)`;
-    }
-    select.appendChild(opt);
-  });
+  const entries = VEHICLE_CONFIGS.map(cfg => ({ cfg, unmet: getUnmetRequirements(s, cfg.tier) }));
+  const unlocked = entries.filter(e => e.unmet.length === 0);
+  const locked = entries.filter(e => e.unmet.length > 0);
 
-  if (prevValue && Array.from(select.options).some(o => o.value === prevValue)) {
-    select.value = prevValue;
+  // 未解锁只显示最近的 1-2 个（下一个目标预览），更远的隐藏不露车型，保持胶囊行紧凑
+  const shownLocked = locked.slice(0, 2);
+  const hiddenLocked = locked.length - shownLocked.length;
+
+  const pills: PillOption[] = [];
+  for (const { cfg, unmet } of [...unlocked, ...shownLocked]) {
+    if (unmet.length > 0) {
+      pills.push({
+        value: cfg.tier.toString(),
+        emoji: cfg.emoji,
+        label: cfg.name,
+        badge: '🔒',
+        disabled: true,
+        lockedHint: unmet.join(' · '),
+      });
+      continue;
+    }
+    // 已解锁：悬停显示统一乘区后的实际造价/占格/耗时（批量采购/精益生产）
+    const effCost = Math.floor(cfg.buildCost * getUpgradeMult(s, 'build_cost'));
+    const effTime = Math.max(1, Math.round(cfg.buildTime * getUpgradeMult(s, 'build_time')));
+    const partsStr = cfg.partsCost > 0 ? `${cfg.partsCost}⚙️ ` : '';
+    const energyStr = `${buildEnergyCost(cfg.tier)}⚡`;
+    pills.push({
+      value: cfg.tier.toString(),
+      emoji: cfg.emoji,
+      label: cfg.name,
+      hint: `${effCost.toLocaleString()}🪙 ${partsStr}${energyStr} · 占${cfg.parkingSpaces}格 · ${effTime}s`,
+    });
   }
+  // 隐藏的未解锁车型：只留一个 🔒+N 占位（不露车型外观）
+  if (hiddenLocked > 0) {
+    pills.push({
+      value: 'hidden-locked',
+      emoji: '🔒',
+      label: `还有 ${hiddenLocked} 个车型未解锁`,
+      badge: `+${hiddenLocked}`,
+      disabled: true,
+      lockedHint: '继续提升科技 / 工厂 / 电站 / 声望来解锁新车型',
+    });
+  }
+
+  // 选中恢复：上次选择仍有效则沿用；否则默认「当前买得起的最新车型」，再退到最高已解锁
+  let sel = lastBuildTier;
+  if (!sel || !pills.some(o => o.value === sel && !o.disabled)) {
+    const unlockedPills = pills.filter(o => !o.disabled);
+    const affordable = unlockedPills.filter(o => canAffordBuild(s, parseInt(o.value, 10)));
+    sel = (affordable[affordable.length - 1] ?? unlockedPills[unlockedPills.length - 1] ?? null)?.value ?? null;
+  }
+
+  renderPills(container, pills, sel, (v) => { lastBuildTier = v; });
+
+  // 选中车型信息行：成本/占格/耗时，资源不足标红
+  const infoEl = document.getElementById('build-tier-info');
+  if (infoEl && sel) {
+    const cfg = getVehicleConfig(parseInt(sel, 10));
+    if (cfg) {
+      const effCost = Math.floor(cfg.buildCost * getUpgradeMult(s, 'build_cost'));
+      const effTime = Math.max(1, Math.round(cfg.buildTime * getUpgradeMult(s, 'build_time')));
+      const partsStr = cfg.partsCost > 0 ? `${cfg.partsCost}⚙️ ` : '';
+      const energyStr = `${buildEnergyCost(cfg.tier)}⚡`;
+      const afford = canAffordBuild(s, cfg.tier);
+      infoEl.innerHTML = `${cfg.emoji} ${cfg.name} · 占${cfg.parkingSpaces}格 · ` +
+        (afford
+          ? `${effCost.toLocaleString()}🪙 ${partsStr}${energyStr} · ${effTime}s`
+          : `<span class="poor">${effCost.toLocaleString()}🪙 ${partsStr}${energyStr} · ${effTime}s（资源不足）</span>`);
+    }
+  }
+}
+
+/** 当前选中的造车 tier（main.ts 制造按钮 / renderWorkbench 共用） */
+export function getBuildTierSelection(): number {
+  return lastBuildTier ? parseInt(lastBuildTier, 10) || 0 : 0;
 }
 
 // ==================== 工作台（M7：建造进度条 + 队列 + 按钮禁用） ====================
@@ -107,9 +173,7 @@ export function renderWorkbench(): void {
   // 建造槽/队列满，或车位（含预留，S2a 占格数口径）满 → 禁用制造按钮；
   // 选中车型未解锁（M9 矩阵）/能源不足（M8）→ 同样置灰并给出原因
   const queueFull = queue.length >= 1 + getBuildQueueMax(s);
-  const selectedTier = parseInt(
-    (document.getElementById('build-tier-select') as HTMLSelectElement | null)?.value ?? '0'
-  );
+  const selectedTier = getBuildTierSelection();
   const selectedSpaces = selectedTier > 0 ? getParkingSpaces(selectedTier) : 0;
   const reservedFull = getOccupiedSpaces(s) + selectedSpaces > s.garage.maxCapacity;
   const unmet = selectedTier > 0 ? getUnmetRequirements(s, selectedTier) : [];
