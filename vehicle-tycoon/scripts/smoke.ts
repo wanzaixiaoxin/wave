@@ -6,13 +6,18 @@ import { EconomySystem, getGlobalIncomeMult } from '../src/systems/EconomySystem
 import { EventSystem, getEventMultiplier } from '../src/systems/EventSystem';
 import { AchievementSystem } from '../src/systems/AchievementSystem';
 import { Quality, OrderType, TraitType, VehicleStatus, OrderStatus, Specialization } from '../src/core/types';
-import { GAME_CONSTANTS, getBreakinBonus, getMileageLifespan, overhaulPartsCost } from '../src/config/GameConstants';
+import { GAME_CONSTANTS, getBreakinBonus, getMileageLifespan, overhaulPartsCost, orderEnergyCost, cargoIncomeMult, speedDurationMult, durabilityWearReduction } from '../src/config/GameConstants';
 import { getVehicleConfig, getUnmetRequirements, getOccupiedSpaces, getParkingSpaces } from '../src/config/VehicleConfig';
 import { FactorySystem, getBuildQueueMax } from '../src/systems/FactorySystem';
 import { TechSystem, getEffectivePartsCost, getSideTechRank } from '../src/systems/TechSystem';
 import { getUpgradeMult, getSubTechRank, getRetrofitLevel } from '../src/systems/UpgradeSystem';
 import type { UpgradeEffectKey } from '../src/core/types';
 import { getEnRouteEventConfig } from '../src/config/EnRouteEventConfig';
+import {
+  CitySystem, getCityPressureTier, getCityIncomeMult, getCityDurationMult,
+  getCityOrderSlotDelta, getCitySoftK, getEffectiveDemandRate, getNominalDemandRate,
+  getCityDeliveryEfficiency,
+} from '../src/systems/CitySystem';
 import { computeHint } from '../src/ui/hint';
 
 let failures = 0;
@@ -36,10 +41,14 @@ v.trait = null; // 排除出厂参数随机性
 const globalMult = getGlobalIncomeMult(state);
 const base = EconomySystem.calculateOrderIncome(v, 100, 1.0, globalMult, false, state, OrderType.Normal).income;
 
-// 1. 载货属性 +4%/级
+// 1. 载货属性递进曲线（满级 +25%；期望模式暴击折算：L5 暴击率 10% 期望 ×1.1，基础 5% 期望 ×1.05）
 v.stats.cargo = 5;
 const withCargo = EconomySystem.calculateOrderIncome(v, 100, 1.0, globalMult, false, state, OrderType.Normal).income;
-check('载货 5 级收入 +20%', withCargo === Math.floor(base * 1.2), `withCargo=${withCargo}`);
+const expectCargo = Math.floor(
+  Math.floor(base / (1 + 0.05 * (GAME_CONSTANTS.CRIT_MULT_DEFAULT - 1)) * 1.25) *
+  (1 + 0.10 * (GAME_CONSTANTS.CRIT_MULT_DEFAULT - 1))
+);
+check('载货 5 级收入 +25%', withCargo === expectCargo, `withCargo=${withCargo} expect=${expectCargo} base=${base}`);
 v.stats.cargo = 0;
 
 // 3. 重载出厂参数 ×1.2
@@ -134,11 +143,20 @@ v.wear = 0;
 const refWear = calcIncome();
 check('高磨损收入 ×0.7', Math.abs(worn / refWear - 0.7) < 0.03, `worn=${worn} ref=${refWear}`);
 
+v.stats.speed = 0; // 无断点口径（v 的属性在前面成就测试里被拉满，先归零）
 v.consecutiveOrders = 3;
 const fatigued = calcIncome();
 v.consecutiveOrders = 0;
 const refFatigue = calcIncome();
 check('连单 3 收入 ×0.76', Math.abs(fatigued / refFatigue - 0.76) < 0.03, `fatigued=${fatigued} ref=${refFatigue}`);
+
+v.stats.speed = 3; // 速度 L3 断点：疲劳衰减减半（0.08→0.04）
+v.consecutiveOrders = 3;
+const fatiguedFast = calcIncome();
+v.consecutiveOrders = 0;
+check('速度 L3 断点：连单 3 收入 ×0.88', Math.abs(fatiguedFast / refFatigue - 0.88) < 0.03,
+  `fatigued=${fatiguedFast} ref=${refFatigue}`);
+v.stats.speed = 5; // 还原（后续用车测试沿用满级属性）
 
 v.specialization = Specialization.Heavy;
 const heavy = calcIncome();
@@ -280,6 +298,38 @@ orderSys.assignVehicle('o_wear', wV.id);
 orderSys.completeOrder('o_wear');
 check('耐久 5 级每单磨损 5×(1-0.4)=3', Math.abs(wV.wear - 3) < 1e-9, `wear=${wV.wear}`);
 
+// 21h. 属性递进曲线 + 断点特技（L3/L5 质变）
+check('载货递进曲线 L1+3% L3+12% L5+25%',
+  Math.abs(cargoIncomeMult(1) - 1.03) < 1e-9 && Math.abs(cargoIncomeMult(3) - 1.12) < 1e-9
+  && Math.abs(cargoIncomeMult(5) - 1.25) < 1e-9 && cargoIncomeMult(0) === 1);
+check('速度递进曲线 L3-12% L5-25%',
+  Math.abs(speedDurationMult(3) - 0.88) < 1e-9 && Math.abs(speedDurationMult(5) - 0.75) < 1e-9);
+check('耐久递进曲线 L3-21% L5-40%（满级持平旧线性）',
+  Math.abs(durabilityWearReduction(3) - 0.21) < 1e-9 && Math.abs(durabilityWearReduction(5) - 0.40) < 1e-9);
+{
+  const bpV = vehicleSys.createVehicle(1)!;
+  bpV.trait = null;
+  bpV.stats.cargo = 3;
+  const gm = getGlobalIncomeMult(state);
+  const valIncome = EconomySystem.calculateOrderIncome(bpV, 100, 1.0, gm, false, state, OrderType.Valuable).income;
+  // 载货×1.12 → 贵重断点×1.15 → 期望模式暴击折算×1.05：floor(floor(floor(100×1.12)×1.15)×1.05) = 134
+  const expectVal = Math.floor(
+    Math.floor(Math.floor(100 * 1.12) * (1 + GAME_CONSTANTS.CARGO_L3_VALUABLE_BONUS)) *
+    (1 + 0.05 * (GAME_CONSTANTS.CRIT_MULT_DEFAULT - 1))
+  );
+  check('载货 L3 断点：贵重单 +15%', valIncome === expectVal, `income=${valIncome} expect=${expectVal}`);
+  bpV.stats.cargo = 5;
+  let crits = 0;
+  for (let i = 0; i < 2000; i++) {
+    if (EconomySystem.calculateOrderIncome(bpV, 100, 1.0, gm, true, state, OrderType.Normal).isCrit) crits++;
+  }
+  check('载货 L5 断点：暴击率 ≈10%（基础5%+断点5%）', crits > 150 && crits < 260, `crits=${crits}/2000`);
+}
+check('耐久 L5 断点：寿命 ×1.25（T5 15000→18750）',
+  getMileageLifespan(5) === 15000 && getMileageLifespan(5, 5) === 18750);
+check('速度 L5 断点：耗电免速度加价（常规 2×1.2=2.4，满速 2.0）',
+  Math.abs(orderEnergyCost(2, 2) - 2.4) < 1e-9 && orderEnergyCost(2, 5) === 2);
+
 // 21g. S2a parkingSpaces 占格容量：T1-3=1 / T4-6=2 / T7-8=3 / T9-10=4
 check('占格矩阵 T1=1 T4=2 T7=3 T9=4',
   getParkingSpaces(1) === 1 && getParkingSpaces(4) === 2
@@ -293,14 +343,14 @@ check('占格矩阵 T1=1 T4=2 T7=3 T9=4',
   ps.techTree.currentLevel = 2;
   const pvs = new VehicleSystem(ps);
   pvs.debugInstantBuild = true;
-  pvs.createVehicle(4); pvs.createVehicle(4); pvs.createVehicle(4); // 3×T4 = 6 格（初始容量 6 格）
-  check('3×T4 占满 6 格', getOccupiedSpaces(ps) === 6, `used=${getOccupiedSpaces(ps)}`);
+  pvs.createVehicle(4); pvs.createVehicle(4); pvs.createVehicle(4); pvs.createVehicle(4); pvs.createVehicle(4); // 5×T4 = 10 格（初始容量 10 格）
+  check('5×T4 占满 10 格', getOccupiedSpaces(ps) === 10, `used=${getOccupiedSpaces(ps)}`);
   check('占格满后 T4 被拒', pvs.createVehicle(4) === null);
   check('占格满后 T1（1 格）也被拒', pvs.createVehicle(1) === null);
   const removed = ps.garage.vehicles[0];
   pvs.scrapVehicle(removed.id); // 腾出 2 格
   check('拆一辆 T4 后 T1 可入', pvs.createVehicle(1) !== null);
-  check('占格口径：2×T4+1×T1 = 5 格', getOccupiedSpaces(ps) === 5, `used=${getOccupiedSpaces(ps)}`);
+  check('占格口径：4×T4+1×T1 = 9 格', getOccupiedSpaces(ps) === 9, `used=${getOccupiedSpaces(ps)}`);
 }
 
 // 22. 工厂超负荷运转：产出 ×2，冷却期不可重复激活
@@ -677,11 +727,21 @@ pushOrder('o_e1', OrderType.Normal);
 const eBefore1 = es.resources.energy;
 const tA = Date.now();
 check('能源充足可派单', eOrder.assignVehicle('o_e1', ev1.id));
-check('每单耗电 1×(1+5×0.1)=1.5', Math.abs(eBefore1 - es.resources.energy - 1.5) < 1e-9,
+check('每单耗电：速度 L5 断点免加价 = 1.0', Math.abs(eBefore1 - es.resources.energy - 1.0) < 1e-9,
   `paid=${eBefore1 - es.resources.energy}`);
 const durFull = ev1.statusEndAt - tA;
 check('能源充足不触发动力不足', !es.orders.find(o => o.id === 'o_e1')?.lowPower);
 eOrder.completeOrder('o_e1');
+
+// 常规速度加价口径（非满级）
+ev1.stats.speed = 2;
+pushOrder('o_e1b', OrderType.Normal);
+const eBefore1b = es.resources.energy;
+check('常规速度车可派单', eOrder.assignVehicle('o_e1b', ev1.id));
+check('每单耗电 1×(1+2×0.1)=1.2', Math.abs(eBefore1b - es.resources.energy - 1.2) < 1e-9,
+  `paid=${eBefore1b - es.resources.energy}`);
+eOrder.completeOrder('o_e1b');
+ev1.stats.speed = 5; // 还原满速（后续动力不足比值测试保持同速）
 
 es.resources.energy = 0;
 pushOrder('o_e2', OrderType.Normal);
@@ -1004,6 +1064,7 @@ qs30.factory.level = 5;
 check('工厂 L5 排队位 +1', getBuildQueueMax(qs30) === 4);
 qs30.resources.gold = 10_000_000;
 qs30.resources.parts = 1_000_000;
+qs30.garage.maxCapacity = 10; // 排除车位容量干扰（本组只断言队列位口径）
 const qVehicle30 = new VehicleSystem(qs30); // 不开 instant：走真实队列
 for (let i = 0; i < 5; i++) qVehicle30.createVehicle(1);
 check('L5 队列容量 = 1 槽 + 4 排队', qs30.garage.buildQueue.length === 5,
@@ -1106,6 +1167,7 @@ const mkTradeState = () => {
 {
   const H = mkTradeState();
   H.vs.debugInstantBuild = false;
+  H.st.garage.maxCapacity = 10; // 排除车位容量干扰（本组只断言队列满口径）
   for (let i = 0; i < 4; i++) H.vs.createVehicle(1); // 1 建造槽 + 3 排队 = 满
   check('队列满时置换被拒', !H.vs.tradeIn(H.old.id, 2).ok);
   check('队列满原因可读', (H.vs.getTradeInQuote(H.old.id, 2).reason ?? '').includes('队列'));
@@ -1113,6 +1175,73 @@ const mkTradeState = () => {
   H.vs.tick(1);
   check('队列腾出后置换恢复', H.vs.tradeIn(H.old.id, 2).ok);
   check('置换新车进入建造队列', H.st.garage.buildQueue.some(j => j.tier === 2));
+}
+
+// 32. S4 城市需求压力：需求累积/自稳定/交付扣积压/三级惩罚/繁荣/基建项目
+{
+  const cs = SaveManager.createInitialState();
+  const citySys = new CitySystem(cs);
+  // 需求累积：60s ≈ 有效需求 × 1 分钟（开局名义 2/分，积压小衰减小）
+  for (let i = 0; i < 60; i++) citySys.tick(1);
+  check('城市需求累积（60s ≈ 2 单位）', cs.city.backlog > 1.5 && cs.city.backlog < 2.5,
+    `backlog=${cs.city.backlog}`);
+  // 自稳定：积压远大于 K 时有效需求 < 名义 ×0.5
+  cs.city.backlog = getCitySoftK(cs) * 10;
+  check('积压自稳定：有效需求衰减过半', getEffectiveDemandRate(cs) < getNominalDemandRate(cs) * 0.5,
+    `eff=${getEffectiveDemandRate(cs)} nom=${getNominalDemandRate(cs)}`);
+  // 交付扣积压（下限 0）
+  cs.city.backlog = 5;
+  citySys.onDelivered(3);
+  check('交付扣积压', Math.abs(cs.city.backlog - 2) < 1e-9, `backlog=${cs.city.backlog}`);
+  citySys.onDelivered(10);
+  check('积压下限 0', cs.city.backlog === 0);
+  // 三级压力阈值与惩罚
+  const k = getCitySoftK(cs);
+  cs.city.backlog = k * GAME_CONSTANTS.CITY_PRESSURE_L1_K;
+  check('L1 紧张：收入 ×0.9', getCityPressureTier(cs) === 1 && Math.abs(getCityIncomeMult(cs) - 0.9) < 1e-9);
+  cs.city.backlog = k * GAME_CONSTANTS.CITY_PRESSURE_L2_K;
+  const repBefore = cs.resources.reputation = 100;
+  citySys.tick(1);
+  check('L2 拥堵：耗时 ×1.15 + 信誉流失', getCityPressureTier(cs) === 2
+    && Math.abs(getCityDurationMult(cs) - 1.15) < 1e-9
+    && cs.resources.reputation < repBefore, `rep=${cs.resources.reputation}`);
+  cs.city.backlog = k * GAME_CONSTANTS.CITY_PRESSURE_L3_K;
+  check('L3 瘫痪边缘：订单槽 -1 + 收入 ×0.81', getCityPressureTier(cs) === 3
+    && getCityOrderSlotDelta(cs) === -1
+    && Math.abs(getCityIncomeMult(cs) - 0.81) < 1e-9);
+  // 恢复：积压清零惩罚消失
+  cs.city.backlog = 0;
+  check('积压清零惩罚全恢复', getCityPressureTier(cs) === 0 && getCityIncomeMult(cs) === 1
+    && getCityDurationMult(cs) === 1 && getCityOrderSlotDelta(cs) === 0);
+  // 繁荣：畅通累积进度 → 升级（收入 +5%，需求同步上升）
+  for (let i = 0; i < GAME_CONSTANTS.CITY_PROSPERITY_PROGRESS_NEED; i++) citySys.tick(1);
+  check('畅通 10 分钟繁荣 +1', cs.city.prosperity === 1, `prosperity=${cs.city.prosperity}`);
+  check('繁荣收入 +5%', Math.abs(getCityIncomeMult(cs) - 1.05) < 1e-9);
+  const nomAfterProsperity = getNominalDemandRate(cs);
+  check('繁荣需求同步上升', nomAfterProsperity > GAME_CONSTANTS.CITY_DEMAND_BASE,
+    `nom=${nomAfterProsperity}`);
+  // 基建项目：分批投入（每次 25% 存量）→ 建成生效（交付效率 +10%）
+  cs.resources.parts = 20000; // 第一批不够
+  check('项目分批投入第一批', citySys.investProject('logistics_hub').ok
+    && !citySys.getProjectProgress('logistics_hub').done);
+  cs.resources.parts = 40000; cs.resources.gold = 30000; // 存量充足，连投直至建成
+  let invested = false;
+  for (let i = 0; i < 50 && !citySys.getProjectProgress('logistics_hub').done; i++) {
+    invested = citySys.investProject('logistics_hub').ok || invested;
+  }
+  check('项目投满建成', invested && citySys.getProjectProgress('logistics_hub').done);
+  check('建成后拒绝重复投入', !citySys.investProject('logistics_hub').ok);
+  check('物流集散点：交付效率 +10%', Math.abs(getCityDeliveryEfficiency(cs) - 1.1) < 1e-9);
+  // 智能调度中心：订单槽 +1
+  cs.city.projects['smart_dispatch'] = { gold: 0, parts: 0, energy: 0, rep: 0, done: true };
+  check('智能调度中心：订单槽 +1', getCityOrderSlotDelta(cs) === 1);
+  // L3 + 调度中心对冲 → 0
+  cs.city.backlog = k * GAME_CONSTANTS.CITY_PRESSURE_L3_K;
+  check('L3 与调度中心对冲订单槽归 0', getCityOrderSlotDelta(cs) === 0);
+  // 无资源投入被拒（清空全部资源，含初始 200🪙）
+  const cs2 = SaveManager.createInitialState();
+  cs2.resources.gold = 0; cs2.resources.parts = 0; cs2.resources.energy = 0; cs2.resources.reputation = 0;
+  check('无资源投入被拒', !new CitySystem(cs2).investProject('logistics_hub').ok);
 }
 
 console.log(failures === 0 ? '\n全部通过 🎉' : `\n${failures} 项失败`);

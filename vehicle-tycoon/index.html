@@ -36,8 +36,8 @@
       --red: #d34f42;             /* 警告 */
       --purple: #9a6fc0;          /* 稀有 */
 
-      --r-s: 8px; --r-m: 12px; --r-l: 16px;
-      /* 贴纸投影：实心错位、无模糊 */
+      --r-s: 2px; --r-m: 3px; --r-l: 4px;   /* 像素都市：组件直角化，仅留微切角 */
+      /* 硬边投影：实心错位、无模糊（像素描边语言） */
       --shadow-1: 3px 3px 0 rgba(51,48,42,0.12);
       --shadow-2: 5px 5px 0 rgba(51,48,42,0.18);
       --shadow-pop: 3px 3px 0 rgba(51,48,42,0.9);
@@ -50,7 +50,7 @@
       width: 100%; min-height: 100vh;
       font-family: var(--font);
       -webkit-font-smoothing: antialiased;
-      background: linear-gradient(180deg, #f7f0e0 0%, var(--bg-1) 100%);
+      background: var(--bg-1);
       color: var(--text-1);
       overflow-x: hidden;
     }
@@ -58,15 +58,17 @@
     ::selection { background: rgba(223,159,51,.35); }
     :focus-visible { outline: 3px solid rgba(55,145,139,.5); outline-offset: 1px; }
 
-    /* 纸面圆点纹理 */
+    /* 像素网格底纹（与地块点阵同语言） */
     body::before {
       content: ''; position: fixed; inset: 0; z-index: -1;
-      background-image: radial-gradient(rgba(51,48,42,0.05) 1.2px, transparent 1.2px);
+      background-image:
+        linear-gradient(rgba(51,48,42,0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(51,48,42,0.045) 1px, transparent 1px);
       background-size: 22px 22px;
     }
 
     #app {
-      max-width: 960px; margin: 0 auto; padding: 8px 12px; gap: 8px;
+      max-width: 1060px; margin: 0 auto; padding: 8px 12px; gap: 6px;
       height: 100dvh; min-height: 0;
       display: flex; flex-direction: column;
       overflow: hidden;
@@ -83,7 +85,7 @@
       .build-info { font-size: 11.5px; margin-top: 5px; }
       #main-home { gap: 10px; }
       #garage { padding: 12px; }
-      .vehicle-grid { gap: 10px; }
+      .vehicle-grid { gap: 10px; grid-auto-rows: clamp(100px, calc((100% - 30px) / 4), 110px); --slot-w: 132px; }
       .vehicle-card { padding: 10px 8px 8px; }
       .vehicle-card .emoji { font-size: 28px; }
       .vehicle-card.span-2 .emoji { font-size: 34px; }
@@ -91,42 +93,45 @@
       .vehicle-card.span-4 .emoji { font-size: 46px; }
       .vehicle-card .name { font-size: 12px; margin: 4px 0 2px; }
       .vehicle-card .card-line { font-size: 9.5px; line-height: 1.4; }
-      #orders { gap: 10px; }
-      .order-card { padding: 12px 9px 9px; }
-      .order-card .reward { font-size: 20px; }
-      .order-card .type { font-size: 11.5px; }
-      .meta-chip { font-size: 10px; padding: 1px 8px; }
-      .order-card .pill { height: 28px; min-width: 30px; font-size: 15px; }
+      #orders { gap: 10px; grid-auto-rows: 132px; }
+      .order-card { padding: 8px 8px 6px; }
+      .order-card .reward { font-size: 16px; }
+      .order-card .type { font-size: 10.5px; }
+      .meta-chip { font-size: 9.5px; padding: 1px 7px; }
+      .order-card .pill { height: 22px; min-width: 25px; font-size: 12px; }
       #log { display: block; }
-      #bottombar { padding: 5px; gap: 6px; }
-      #bottombar button { padding: 9px 4px; font-size: 13px; }
       .tech-node { padding: 9px 13px; font-size: 12px; }
       .tech-node.sub { padding: 7px 11px; margin-left: 16px; }
     }
 
     /* ===== 主区域：车库 + 订单 + 面板（同屏布局，无页面滚动） ===== */
-    #main-area { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    #main-area { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+    /* 园区地图：上街道/道路、下左右地块（车库贴左、订单贴右沿用） */
     #main-home {
       flex: 1; min-height: 0;
-      display: flex; flex-direction: column; gap: 8px;
+      display: flex; flex-direction: column;
     }
     #main-home.hidden { display: none; }
     .panel {
       display: none; flex: 1; min-height: 0;
       background: var(--bg-2);
-      border-radius: var(--r-l); border: 2px solid var(--line);
+      border-radius: var(--r-l); border: 3px solid var(--line);
       padding: 12px; box-shadow: var(--shadow-1);
+      /* 内容超出时面板内部滚动，绝不溢出压到日志/底部导航 */
+      overflow-y: auto; overscroll-behavior: contain;
     }
     .panel.visible { display: block; }
+    .panel::-webkit-scrollbar { width: 6px; }
+    .panel::-webkit-scrollbar-thumb { background: var(--line-soft); border-radius: 3px; }
 
     /* ===== 顶栏 HUD：资源胶囊 ===== */
     #topbar {
       display: flex; justify-content: space-between; align-items: center;
       gap: 7px; flex-wrap: wrap;
-      padding: 6px 9px;
+      padding: 5px 9px;
       background: var(--bg-2);
       border-radius: var(--r-l);
-      border: 2px solid var(--line);
+      border: 3px solid var(--line);
       box-shadow: var(--shadow-1);
     }
     .resource {
@@ -134,7 +139,7 @@
       padding: 3px 9px;
       background: var(--bg-0);
       border: 1.5px solid var(--line);
-      border-radius: 999px;
+      border-radius: 2px;
       font-size: 12.5px; font-weight: 800;
     }
     .resource .icon { font-size: 13px; }
@@ -146,7 +151,7 @@
     #eps { font-size: 10.5px; color: var(--text-3); font-weight: 600; font-variant-numeric: tabular-nums; }
     #tier-label {
       font-size: 11.5px; font-weight: 700; color: var(--text-2);
-      padding: 3px 9px; border-radius: 999px;
+      padding: 3px 9px; border-radius: 2px;
       background: var(--bg-3); border: 1.5px solid var(--line-soft);
     }
 
@@ -156,8 +161,8 @@
     /* ===== 造车工作台 ===== */
     .workbench {
       background: var(--bg-2);
-      border-radius: var(--r-l); border: 2px solid var(--line);
-      padding: 8px 10px;
+      border-radius: var(--r-l); border: 3px solid var(--line);
+      padding: 6px 10px;
       display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
       box-shadow: var(--shadow-1);
       position: relative;
@@ -187,17 +192,19 @@
     .pill-badge {
       position: absolute; top: -6px; right: -6px;
       font-size: 9px; line-height: 1.5;
-      background: var(--bg-2); border: 1.5px solid var(--line); border-radius: 999px;
+      background: var(--bg-2); border: 1.5px solid var(--line); border-radius: 2px;
       padding: 0 3px; pointer-events: none;
     }
     .modal .pill-row { margin: 10px 0 2px; }
     /* 选中车型信息行（造车工作台）：成本/占格/耗时，资源不足标红 */
     .build-info {
-      width: 100%; margin-top: 5px;
+      width: 100%; margin-top: 3px;
       font-size: 11.5px; font-weight: 700; color: var(--text-2);
       font-variant-numeric: tabular-nums;
     }
     .build-info .poor { color: var(--red); }
+    /* 制造禁用原因常驻行（车位不足/未解锁/能源不足/队列满）：槽位常驻，不顶动下方车库/订单 */
+    .build-info.blocker { color: var(--red); margin-top: 2px; min-height: 15px; }
 
     /* 贴纸按钮：墨线 + 实心错位投影，按压时位移吞影 */
     .btn {
@@ -217,20 +224,20 @@
     .btn-secondary { background: var(--bg-0); color: var(--text-1); }
     .btn-gold { background: var(--gold); color: var(--gold-ink); }
 
-    /* 建造进度（M7）：贴纸风进度条 + 排队胶囊（紧凑单行） */
-    #build-status { margin-top: 5px; }
+    /* 建造进度（M7）：贴纸风进度条 + 排队胶囊（紧凑单行）；槽位常驻固定高度，建造开始/结束不顶动版面 */
+    #build-status { margin-top: 4px; min-height: 36px; }
     .build-active {
       display: flex; justify-content: space-between; align-items: center; gap: 8px;
       font-size: 10px; font-weight: 700; color: var(--text-1); margin-bottom: 2px;
     }
     .build-queue { color: var(--text-3); font-weight: 600; display: flex; gap: 4px; flex-wrap: wrap; }
     .build-queue-item {
-      padding: 0 7px; border-radius: 999px;
+      padding: 0 7px; border-radius: 2px;
       background: var(--bg-3); border: 1.5px solid var(--line-soft);
       font-size: 9.5px; font-weight: 700; color: var(--text-2);
     }
     .build-progress {
-      height: 6px; border-radius: 999px; overflow: hidden;
+      height: 6px; border-radius: 2px; overflow: hidden;
       background: var(--bg-3); border: 1.5px solid var(--line);
     }
     .build-progress-bar {
@@ -241,28 +248,33 @@
     /* ===== 区域标题 ===== */
     .section-title {
       font-size: 11px; font-weight: 800; color: var(--text-2);
-      letter-spacing: 2px; padding: 5px 12px;
+      letter-spacing: 2px; padding: 4px 10px;
       border-left: 4px solid var(--coral);
-      margin: 4px 0 6px;
+      margin: 2px 0 5px;
     }
 
-    /* ===== 车库 ===== */
+    /* ===== 车库（左右结构左侧）：撑满订单区以左的全部宽度，高度撑满主区域 ===== */
     #garage {
-      flex: 1; min-height: 0;
+      flex: 1 1 auto; min-height: 0;
       background: var(--bg-3);
       border-radius: var(--r-l); border: 2px solid var(--line);
-      padding: 12px;
+      padding: 10px;
       box-shadow: var(--shadow-1);
       display: flex; flex-direction: column;
       overflow: hidden; /* 兜底：车位网格永不溢出到订单区 */
     }
     .vehicle-grid {
+      --slot-w: 120px; /* 单格尺寸：卡=格，占几格就宽几格，空车位同尺寸，严格对齐 */
+      /* 行数恒 = 容量/5（空位填满整行），最大 4 行（20 格）。行高：空间够时固定 84px 不缩放；
+         不够时按 (容器高-行间gap)/4 等比压缩，保证 4 行永远一屏装下、零滚动；74px 触底才滚动 */
       flex: 1; min-height: 0;
       display: grid;
-      grid-template-columns: repeat(6, 1fr);
-      /* 行高下限 96px 保证卡片不扁，上限随可用空间均分 */
-      grid-auto-rows: minmax(96px, 1fr);
-      gap: 10px;
+      grid-template-columns: repeat(5, minmax(0, var(--slot-w))); /* 列数与 GARAGE_LOT_COLS 一致（renderGarage 同步）；空间不足时可收缩 */
+      justify-content: center; /* 车位组整体居中，两侧留白即停车场边界 */
+      grid-auto-rows: clamp(74px, calc((100% - 24px) / 4), 84px);
+      align-content: start;
+      overflow-y: auto;
+      gap: 8px;
       align-items: stretch;
     }
 
@@ -290,37 +302,60 @@
     .vehicle-card {
       background: var(--bg-2);
       border-radius: var(--r-m); border: 2px solid var(--line);
-      padding: 8px 6px 6px;
+      padding: 6px 5px 5px;
       cursor: pointer; position: relative;
       box-shadow: var(--shadow-1);
       transition: transform 0.15s, box-shadow 0.15s;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
+      min-width: 0; overflow: hidden;
     }
     .vehicle-card:hover {
-      transform: translate(-2px,-2px) rotate(-0.5deg);
+      transform: translate(-2px,-2px);
       box-shadow: var(--shadow-2);
     }
-    .vehicle-card .emoji { font-size: 24px; text-align: center; display: block; line-height: 1.05; }
-    /* 大车占更多车位 → 图标随之放大，车库更形象 */
-    .vehicle-card.span-2 .emoji { font-size: 30px; }
-    .vehicle-card.span-3 .emoji { font-size: 36px; }
-    .vehicle-card.span-4 .emoji { font-size: 42px; }
+    .vehicle-card .emoji {
+      font-size: 20px; text-align: center; display: block; line-height: 1.05;
+      filter: drop-shadow(1.5px 1.5px 0 rgba(51,48,42,0.15));
+    }
+    /* 大车占更多车位 → 图标随之放大，车库更形象（行高自适应，尺寸按矮行高不溢出适配） */
+    .vehicle-card.span-2 .emoji { font-size: 24px; }
+    .vehicle-card.span-3 .emoji { font-size: 28px; }
+    .vehicle-card.span-4 .emoji { font-size: 32px; }
     .vehicle-card .name {
-      font-size: 11px; font-weight: 800; text-align: center;
-      margin: 3px 0 1px; color: var(--text-1);
+      font-size: 10.5px; font-weight: 800; text-align: center;
+      margin: 2px 0 1px; color: var(--text-1);
+      max-width: 100%;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .vehicle-card .card-line {
-      font-size: 9px; color: var(--text-3); text-align: center;
+      font-size: 8.5px; color: var(--text-3); text-align: center;
       line-height: 1.35; font-weight: 600;
+      max-width: 100%;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .vehicle-card .card-line.residual-low { color: var(--red); font-weight: 700; }
-    /* 状态圆点：空闲绿 / 派单橙 / 升级中紫（悬停看文字） */
+    /* 属性芯片：养成结果上卡片（速度/载货/耐久等级 + 运营配置图标）；0 级灰显、满级金色 */
+    .stat-chips {
+      display: flex; gap: 3px; justify-content: center; align-items: center;
+      margin-top: 2px; line-height: 1;
+      font-size: 9px; font-weight: 800; color: var(--text-2);
+      white-space: nowrap;
+    }
+    .stat-chips .chip.zero { opacity: 0.35; }
+    .stat-chips .chip.max { color: var(--gold-strong); }
+    .stat-chips .chip.spec { color: var(--teal); }
+    /* 建造队列占位卡：虚线施工中，区分于实车，不可点击 */
+    .vehicle-card.building {
+      border-style: dashed; border-color: var(--teal);
+      background: var(--bg-0); opacity: 0.8; cursor: default;
+    }
+    .vehicle-card.building:hover { transform: none; box-shadow: var(--shadow-1); }
+    .vehicle-card.building .card-line { color: var(--teal); font-weight: 700; }
+    /* 状态方块：空闲绿 / 派单橙 / 升级中紫（悬停看文字） */
     .vehicle-card .status-dot {
       position: absolute; right: 5px; bottom: 4px;
-      width: 8px; height: 8px; border-radius: 50%;
+      width: 8px; height: 8px;
       border: 1.5px solid var(--line);
     }
     .vehicle-card .status-dot.idle { background: var(--green); }
@@ -344,7 +379,7 @@
 
     .quality-badge {
       position: absolute; top: 5px; right: 5px;
-      padding: 1px 7px; border-radius: 999px;
+      padding: 1px 7px; border-radius: 2px;
       font-size: 9px; font-weight: 800; line-height: 1.7; letter-spacing: 0.5px;
       border: 1.5px solid;
     }
@@ -358,63 +393,123 @@
     /* 车型 tier 角标（卡片左上角）：一眼看清这是第几代车 */
     .tier-badge {
       position: absolute; top: 5px; left: 5px;
-      padding: 1px 7px; border-radius: 999px;
+      padding: 1px 7px; border-radius: 2px;
       font-size: 9px; font-weight: 800; line-height: 1.7; letter-spacing: 0.5px;
       background: #e2f0ee; color: var(--teal); border: 1.5px solid var(--teal);
     }
 
     .status-badge {
-      display: inline-block; padding: 2px 9px; border-radius: 999px;
+      display: inline-block; padding: 2px 9px; border-radius: 2px;
       font-size: 10px; font-weight: 800; margin-top: 4px;
       border: 1.5px solid;
     }
     .status-badge.idle { background: #e6f2de; color: var(--green); border-color: var(--green); }
     .status-badge.busy { background: #fbe8d8; color: var(--orange); border-color: var(--orange); }
+    .status-badge.maintenance { background: #efe4f8; color: var(--purple); border-color: var(--purple); }
 
-    /* ===== 订单区 ===== */
-    #orders-wrap { display: flex; flex-direction: column; min-height: 0; }
+    /* ===== 车辆详情弹窗（宽版分区布局） ===== */
+    .modal.modal-vd { max-width: 430px; }
+    .vd-sub {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+      font-size: 11px; font-weight: 700; color: var(--text-2);
+      margin: -6px 0 4px;
+    }
+    .vd-sub .status-badge { margin-top: 0; }
+    .vd-sec { border-top: 1.5px dashed var(--line-soft); padding-top: 7px; margin-top: 9px; }
+    .vd-sec-title {
+      font-size: 10px; font-weight: 800; letter-spacing: 2px;
+      color: var(--text-3); margin-bottom: 4px;
+    }
+    .vd-row {
+      display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+      font-size: 11.5px; font-weight: 600; color: var(--text-2); padding: 2px 0;
+    }
+    .vd-row b { color: var(--text-1); font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+    .vd-row b.warn { color: var(--red); }
+    .vd-bar {
+      height: 7px; border-radius: 2px; overflow: hidden;
+      background: var(--bg-3); border: 1.5px solid var(--line); margin: 3px 0 4px;
+    }
+    .vd-bar > div { height: 100%; background: var(--teal); }
+    .vd-stats { display: flex; gap: 6px; }
+    .vd-stat {
+      flex: 1; text-align: center; padding: 4px 4px;
+      background: var(--bg-0); border: 1.5px solid var(--line-soft); border-radius: var(--r-s);
+      font-size: 10.5px; font-weight: 700; color: var(--text-2);
+    }
+    .vd-pips { display: block; margin-top: 1px; font-size: 9px; letter-spacing: 1.5px; color: var(--gold-strong); }
+    .vd-note { font-size: 9.5px; font-weight: 600; color: var(--text-3); margin: 4px 0 2px; }
+    /* 操作按钮两列网格：主操作珊瑚红 / 处置金色 / 危险红色描边 */
+    .vd-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+    .vd-actions button {
+      padding: 8px 6px;
+      border: 2px solid var(--line); border-radius: var(--r-s);
+      background: var(--bg-0); color: var(--text-1);
+      font-size: 11.5px; font-weight: 800; cursor: pointer;
+      box-shadow: 2px 2px 0 rgba(51,48,42,0.9);
+      transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
+      touch-action: manipulation;
+    }
+    .vd-actions button:hover { transform: translate(-1px,-1px); box-shadow: 3px 3px 0 rgba(51,48,42,0.9); filter: brightness(1.03); }
+    .vd-actions button:active { transform: translate(1px,1px); box-shadow: 1px 1px 0 rgba(51,48,42,0.9); }
+    .vd-actions button.primary { background: var(--coral); color: #fffdf6; }
+    .vd-actions button.gold { background: var(--gold); color: var(--gold-ink); }
+    .vd-actions button.danger { background: #f9e6e3; color: var(--red); border-color: var(--red); }
+    .vd-actions .span2 { grid-column: 1 / -1; }
+    .vd-actions.vd-close { margin-top: 8px; }
+    .vd-actions.vd-close button { background: var(--bg-3); color: var(--text-2); box-shadow: none; }
+
+    /* ===== 订单区（左右结构右侧）：固定窄列竖排 3 张卡，卡高恒定，区域不伸缩 ===== */
+    #orders-wrap {
+      display: flex; flex-direction: column; min-height: 0;
+      flex: 0 0 auto; width: 232px; /* 与车辆卡片相近的体量，不做大 */
+      overflow-y: auto; /* 极矮窗口兜底（正常窗口 3 卡 + 标题恒装下） */
+    }
     #orders {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+      display: grid; grid-template-columns: 1fr; gap: 8px;
+      /* 卡高恒 124px（= 最高形态：标题+赏金+标签+提示+胶囊行+派车按钮），无单/满员同高 */
+      grid-auto-rows: 124px;
     }
     .order-card {
       display: flex; flex-direction: column; align-items: stretch;
       background: var(--bg-2);
       border-radius: var(--r-m); border: 2px solid var(--line);
-      padding: 10px 8px 8px; text-align: center;
+      padding: 6px 7px 5px; text-align: center;
       box-shadow: var(--shadow-1);
       transition: transform 0.15s, box-shadow 0.15s;
     }
     .order-card:hover { transform: translate(-1px,-1px); box-shadow: var(--shadow-2); }
     .order-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1px; }
-    .order-head .type { font-size: 11px; color: var(--text-2); font-weight: 700; letter-spacing: 0.5px; }
+    .order-head .type { font-size: 10px; color: var(--text-2); font-weight: 700; letter-spacing: 0.5px; }
     .order-tier {
-      padding: 1px 7px; border-radius: 999px;
+      padding: 0 6px; border-radius: 2px;
       background: var(--bg-3); border: 1.5px solid var(--line-soft);
-      font-size: 10px; font-weight: 800; color: var(--teal);
+      font-size: 9.5px; font-weight: 800; color: var(--teal);
     }
     .order-meta {
       display: flex; gap: 4px; justify-content: center; align-items: center;
-      min-height: 17px; margin: 1px 0;
+      min-height: 14px; margin: 1px 0;
     }
     .meta-chip {
-      padding: 1px 7px; border-radius: 999px;
+      padding: 0 6px; border-radius: 2px;
       background: var(--bg-3); border: 1.5px solid var(--line-soft);
-      font-size: 9.5px; font-weight: 700; color: var(--text-2);
+      font-size: 9px; font-weight: 700; color: var(--text-2);
       font-variant-numeric: tabular-nums;
     }
     .meta-chip.rep { background: #e2f0ee; color: var(--teal); border-color: var(--teal); }
     .order-card .reward {
-      font-size: 18px; font-weight: 900; color: var(--gold-strong);
+      font-size: 14px; font-weight: 900; color: var(--gold-strong);
       margin: 1px 0; font-variant-numeric: tabular-nums;
     }
-    .order-card .vehicle-hint { font-size: 9.5px; color: var(--text-3); font-weight: 600; margin: 2px 0; min-height: 12px; }
-    .order-card .pill-row { justify-content: center; margin: 2px 0; }
-    .order-card .pill { height: 25px; min-width: 28px; padding: 0 6px; font-size: 13px; }
+    .order-card .vehicle-hint { font-size: 9px; color: var(--text-3); font-weight: 600; margin: 1px 0; min-height: 11px; }
+    /* 胶囊单行不换行：极端情况（车型组很多）行内横滑，绝不撑破卡片固定高度 */
+    .order-card .pill-row { justify-content: center; margin: 1px 0; flex-wrap: nowrap; overflow-x: auto; }
+    .order-card .pill { height: 20px; min-width: 23px; padding: 0 5px; font-size: 11px; flex: 0 0 auto; }
 
     .order-card .btn-dispatch {
-      margin-top: auto; padding: 5px 12px;
+      margin-top: auto; padding: 3px 10px;
       border: 2px solid var(--line); border-radius: var(--r-s);
-      font-size: 11px; font-weight: 800; cursor: pointer;
+      font-size: 10.5px; font-weight: 800; cursor: pointer;
       transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
     }
     .order-card .btn-dispatch.active {
@@ -428,25 +523,17 @@
       border-color: var(--line-soft); box-shadow: none;
     }
 
-    /* ===== 底部导航：胶囊容器 ===== */
-    #bottombar {
-      display: flex; gap: 6px; padding: 5px;
-      background: var(--bg-2); border: 2px solid var(--line);
-      border-radius: var(--r-l); box-shadow: var(--shadow-1);
+    /* ===== 面板打开时的「返回园区」浮钮（底栏已移除，导航统一走园区建筑） ===== */
+    #btn-back-home {
+      display: none; position: absolute; top: 8px; right: 10px; z-index: 20;
+      padding: 5px 12px; font-size: 11px; font-weight: 800; cursor: pointer;
+      background: var(--bg-0); color: var(--text-1);
+      border: 2px solid var(--line); border-radius: 2px; box-shadow: var(--shadow-1);
     }
-    #bottombar button {
-      flex: 1; padding: 9px 4px;
-      border: 2px solid transparent; border-radius: var(--r-m);
-      font-size: 13px; font-weight: 800; cursor: pointer;
-      background: transparent; color: var(--text-3);
-      transition: color 0.15s, background 0.15s, border-color 0.15s;
-    }
-    #bottombar button:hover { color: var(--text-1); background: var(--bg-3); }
-    #bottombar button.active {
-      background: var(--coral); color: #fffdf6;
-      border-color: var(--line);
-      box-shadow: var(--shadow-pop);
-    }
+    #btn-back-home:hover { background: var(--bg-3); }
+    /* 园区建筑当前激活态（对应面板打开时高亮） */
+    .map-bld.active { transform: translateY(-2px); box-shadow: 0 3px 0 0 var(--line); filter: brightness(1.06); }
+
 
     /* ===== 科技树 ===== */
     .tech-tree { display: flex; flex-direction: column; gap: 6px; }
@@ -487,15 +574,262 @@
       font-size: 12px; font-weight: 600;
     }
 
-    #log {
-      font-size: 10.5px; color: var(--text-3);
-      background: var(--bg-3); border-radius: var(--r-s); padding: 4px 10px;
-      border: 1.5px solid var(--line-soft); line-height: 1.6; font-weight: 600;
+    /* ===== S4 城市面板：压力等级徽章 + 积压进度条警示色 ===== */
+    .pressure-badge {
+      padding: 1px 9px; border-radius: 2px; border: 1.5px solid;
+      font-size: 10px; letter-spacing: 1px;
+    }
+    .pressure-badge.p0 { background: #e6f2de; color: var(--green); border-color: var(--green); }
+    .pressure-badge.p1 { background: #faecd0; color: var(--gold-strong); border-color: var(--gold-deep); }
+    .pressure-badge.p2 { background: #fbe8d8; color: var(--orange); border-color: var(--orange); }
+    .pressure-badge.p3 { background: #f9e6e3; color: var(--red); border-color: var(--red); }
+    .vd-bar > div.city-bar-warn { background: var(--orange); }
+
+    /* ===== 像素都市园区地图：硬边色块 + 点阵 + 阶梯描边（无图片素材，纯 CSS 像素风） ===== */
+    /* 地块：草地底 + 像素阶梯描边（box-shadow 错位法做「像素圆角」） */
+    .map-plot {
+      position: relative;
+      border: 3px solid var(--line);
+      box-shadow: 0 -3px 0 0 var(--line), 0 3px 0 0 var(--line), -3px 0 0 0 var(--line), 3px 0 0 0 var(--line);
+      background:
+        repeating-linear-gradient(0deg, transparent 0 10px, rgba(51,48,42,0.05) 10px 11px),
+        repeating-linear-gradient(90deg, transparent 0 10px, rgba(51,48,42,0.05) 10px 11px),
+        linear-gradient(180deg, #8aa865 0 6px, #a8bf7e 6px); /* 顶缘墨绿檐口 + 草地点阵 */
+      border-radius: 2px;
+      display: flex; flex-direction: column; min-height: 0;
+    }
+    /* 地块名牌（停车场/货运站）：沥青色块牌 + 白字 */
+    .map-plot .section-title {
+      background: #4a4a52; color: #fff8e7; border-left: none; border-bottom: 3px solid var(--line);
+      padding: 5px 10px; margin: 0 0 6px; font-size: 11px; letter-spacing: 1px;
+    }
+    .map-plot .section-title span:not(.btn) { color: #ffe08a !important; }
+    /* 地块内层去重：车库/订单区自身的边框底色交给地块外壳 */
+    .map-plot > #garage { background: transparent; border: none; box-shadow: none; border-radius: 0; padding: 8px; }
+    .map-plot > #orders-wrap { padding: 8px; overflow: hidden; }
+    .map-plot > #orders-wrap #orders { flex: 1; overflow-y: auto; min-height: 0; padding-right: 2px; }
+    /* 城区街道：5 建筑 + 点阵道路 */
+    #map-street {
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+      padding: 8px 8px 0;
+      background:
+        repeating-linear-gradient(90deg, transparent 0 14px, rgba(51,48,42,0.06) 14px 15px),
+        linear-gradient(180deg, #a8bf7e, #8aa865); /* 草地 */
+      border: 3px solid var(--line); border-bottom: none;
+    }
+    .map-bld {
+      display: flex; flex-direction: column; align-items: center; gap: 1px;
+      padding: 5px 4px 6px; cursor: pointer; position: relative;
+      border: 3px solid var(--line); border-bottom: none;
+      background:
+        repeating-linear-gradient(90deg, transparent 0 6px, rgba(255,224,138,0.85) 6px 9px, transparent 9px 15px), /* 像素窗格 */
+        linear-gradient(180deg, var(--roof, #c9574f) 0 8px, var(--wall, #f0e2c4) 8px); /* 硬边屋顶+墙体 */
+      background-origin: border-box;
+      font-family: inherit; color: var(--text-1);
+      transition: transform 0.08s steps(2);
+      image-rendering: pixelated;
+    }
+    .map-bld:hover { transform: translateY(-2px); }
+    .map-bld .bld-icon { font-size: 18px; line-height: 1.1; margin-top: 6px; }
+    .map-bld .bld-name { font-size: 10px; font-weight: 800; letter-spacing: 1px; }
+    .map-bld .bld-badge {
+      font-size: 9px; font-weight: 800; font-variant-numeric: tabular-nums;
+      padding: 0 6px; border: 1.5px solid var(--line); background: var(--bg-0);
+      min-height: 13px; display: flex; align-items: center; gap: 3px;
+    }
+    .map-bld .bld-badge.warn { background: #f9e6e3; color: var(--red); border-color: var(--red); }
+    /* 市政厅压力等级：建筑边框变色（p0-p3 与压力徽章同色） */
+    .map-bld.press-p1 { border-color: var(--gold-deep); }
+    .map-bld.press-p2 { border-color: var(--orange); }
+    .map-bld.press-p3 { border-color: var(--red); }
+    /* 研究院进度条（徽标内嵌迷你条） */
+    .bld-badge .mini-bar { width: 34px; height: 5px; border: 1px solid var(--line); background: var(--bg-3); }
+    .bld-badge .mini-bar > i { display: block; height: 100%; background: var(--blue); }
+    /* 点阵道路：沥青 + 黄白虚线 + 来回开的像素小车 */
+    #map-road {
+      position: relative; height: 26px; overflow: hidden;
+      border: 3px solid var(--line); border-top: none;
+      background:
+        repeating-linear-gradient(90deg, transparent 0 12px, #ffe08a 12px 20px, transparent 20px 32px) 0 12px / 100% 3px no-repeat,
+        #4a4a52;
+    }
+    .map-car { position: absolute; top: 3px; font-size: 14px; line-height: 1; will-change: left; }
+    .map-car.drive-r { animation: mapDriveR linear infinite; }
+    .map-car.drive-l { animation: mapDriveL linear infinite; transform: scaleX(-1); }
+    @keyframes mapDriveR { from { left: -8%; } to { left: 104%; } }
+    @keyframes mapDriveL { from { left: 104%; } to { left: -8%; } }
+    /* 地图整体：上街道+道路，下左右地块 */
+    .city-map { display: flex; flex-direction: column; min-height: 0; }
+    .city-map .map-street-wrap { flex: none; }
+    .city-map .map-plots {
+      flex: 1; min-height: 0; margin-top: 8px;
+      display: flex; flex-direction: row; align-items: stretch; justify-content: space-between; gap: 10px;
+    }
+    .map-plot.parking { flex: 1 1 auto; }
+    .map-plot.depot { flex: 0 0 auto; }
+    /* 矮屏收缩：街道条压扁、图标缩小，保住停车场 5×4 网格 */
+    @media (max-height: 850px) {
+      #map-street { padding-top: 5px; gap: 6px; }
+      .map-bld { padding: 3px 3px 4px; }
+      .map-bld .bld-icon { font-size: 14px; margin-top: 4px; }
+      .map-bld .bld-name { font-size: 9px; }
+      #map-road { height: 20px; }
+      .map-car { font-size: 11px; top: 2px; }
+      .city-map .map-plots { margin-top: 6px; }
+    }
+
+    /* ===== 活地图：真实运输车辆（位置=订单进度，1Hz 内联 left + transition 平滑） ===== */
+    .map-car-live {
+      position: absolute; font-size: 14px; line-height: 1; z-index: 2;
+      transition: left 1s linear;
+      will-change: left;
+    }
+    .map-car-live .car-progress {
+      position: absolute; left: 0; right: 0; bottom: -4px; height: 2px;
+      background: rgba(255,253,246,0.35);
+    }
+    .map-car-live .car-progress > i { display: block; height: 100%; background: #ffe08a; }
+    .map-car-live.return { transform: scaleX(-1); }
+    /* 新车出厂：从工厂滑向停车场的一次性动画 */
+    .map-car-deliver {
+      position: absolute; top: 2px; font-size: 16px; z-index: 3;
+      transition: left 1.2s steps(24), opacity 0.3s 1s;
+    }
+    /* ===== 建筑活状态：烟囱冒烟 / 实验室灯光 / 电站火花 ===== */
+    .map-bld .bld-smoke { position: absolute; top: -4px; left: 8px; display: none; }
+    .map-bld.producing .bld-smoke { display: block; }
+    .map-bld .bld-smoke i {
+      position: absolute; width: 5px; height: 5px; background: #d8d2c2;
+      animation: smokeUp 1.6s steps(6) infinite;
+    }
+    .map-bld .bld-smoke i:nth-child(2) { left: 5px; animation-delay: 0.5s; }
+    .map-bld .bld-smoke i:nth-child(3) { left: 2px; animation-delay: 1s; }
+    @keyframes smokeUp {
+      0% { transform: translateY(0); opacity: 0.9; }
+      100% { transform: translateY(-14px); opacity: 0; }
+    }
+    .map-bld .bld-lab { position: absolute; top: 3px; right: 6px; font-size: 9px; display: none; }
+    .map-bld.researching .bld-lab { display: block; animation: labBlink 1s steps(2) infinite; }
+    @keyframes labBlink { 50% { opacity: 0.25; } }
+    .map-bld .bld-spark { position: absolute; top: 2px; right: 5px; font-size: 10px; display: none; }
+    .map-bld.overcharge .bld-spark { display: block; animation: sparkHop 0.6s steps(3) infinite; }
+    @keyframes sparkHop { 50% { transform: translateY(-3px); } }
+
+    /* ===== 场景化面板头：车间 / 储罐 / 烧瓶 / 天际线（纯 CSS 硬边像素风） ===== */
+    .scene {
+      border: 3px solid var(--line); border-radius: 2px; margin-bottom: 10px;
+      background:
+        repeating-linear-gradient(0deg, transparent 0 8px, rgba(51,48,42,0.06) 8px 9px),
+        linear-gradient(180deg, #b8cfe0 0 55%, #8aa865 55%); /* 天空硬切地面 */
+      position: relative; overflow: hidden;
+    }
+    .scene-label {
+      position: absolute; top: 3px; left: 6px; font-size: 9px; font-weight: 800;
+      color: var(--text-2); letter-spacing: 1px; opacity: 0.75; z-index: 2;
+    }
+    /* —— 车间：厂房楼层 + 传送带 + 在造车辆成型 + 队列 —— */
+    #factory-scene { height: 116px; display: flex; align-items: flex-end; gap: 10px; padding: 0 10px 26px; }
+    .scene-floors { display: flex; flex-direction: column-reverse; gap: 0; margin-bottom: 0; }
+    .scene-floors .floor {
+      width: 46px; height: 9px; border: 2px solid var(--line); border-bottom: none;
+      background:
+        repeating-linear-gradient(90deg, transparent 0 5px, #ffe08a 5px 8px, transparent 8px 13px),
+        #c9574f;
+    }
+    .scene-floors .floor:last-child { border-bottom: 2px solid var(--line); }
+    .scene-floors .floor.drop { animation: floorDrop 0.5s steps(8); }
+    @keyframes floorDrop { 0% { transform: translateY(-16px); opacity: 0; } 100% { transform: none; opacity: 1; } }
+    .scene-belt {
+      flex: 1; position: relative; height: 44px;
+      border: 2px solid var(--line); background: #5a5a64;
+    }
+    .scene-belt::before { /* 传送带条纹滚动 */
+      content: ''; position: absolute; left: 0; right: 0; bottom: 2px; height: 8px;
+      background: repeating-linear-gradient(90deg, #8f8f9a 0 8px, #4a4a52 8px 16px);
+      animation: beltRoll 0.8s steps(4) infinite;
+    }
+    @keyframes beltRoll { to { background-position: 16px 0; } }
+    .scene-build { position: absolute; left: 8px; bottom: 12px; text-align: center; width: 60px; }
+    .scene-build .parts { font-size: 13px; }
+    .scene-build .arrow { font-size: 10px; color: #ffe08a; }
+    .scene-build .wip {
+      font-size: 22px; line-height: 1;
+      clip-path: inset(100% 0 0 0); /* JS 按进度自下而上成型 */
+      transition: clip-path 0.9s linear;
+    }
+    .scene-build .wip-pct { font-size: 9px; font-weight: 800; color: #ffe08a; }
+    .scene-build.idle .wip { opacity: 0.3; clip-path: none; filter: grayscale(1); }
+    .scene-queue { position: absolute; right: 6px; bottom: 12px; display: flex; gap: 3px; align-items: flex-end; }
+    .scene-queue .q-car { font-size: 15px; opacity: 0.75; }
+    .scene-queue .q-label { font-size: 8px; color: #d8d2c2; font-weight: 800; }
+    /* —— 电站储罐：液位=储能%，超负荷火焰 —— */
+    #power-scene { height: 64px; display: flex; align-items: flex-end; gap: 10px; padding: 0 12px 8px; }
+    .scene-tank {
+      position: relative; width: 44px; height: 44px;
+      border: 3px solid var(--line); background: var(--bg-0); overflow: hidden;
+    }
+    .scene-tank .tank-liquid {
+      position: absolute; left: 0; right: 0; bottom: 0; height: 0%;
+      background: #e8a33d; transition: height 0.9s linear;
+    }
+    .scene-tank .tank-bolt {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 16px; text-shadow: 0 0 2px #fff;
+    }
+    .scene-tank.overclock { animation: tankShake 0.4s steps(2) infinite; border-color: var(--orange); }
+    @keyframes tankShake { 50% { transform: translateX(1px); } }
+    .scene-tank-info { font-size: 10px; font-weight: 800; color: var(--text-2); padding-bottom: 4px; }
+    /* —— 研究院烧瓶：液位=研究进度 —— */
+    #tech-scene { height: 84px; display: flex; align-items: flex-end; gap: 12px; padding: 0 14px 10px; }
+    .scene-flask { position: relative; font-size: 40px; line-height: 1; }
+    .scene-flask .flask-liquid {
+      position: absolute; left: 18%; right: 18%; bottom: 6%; height: 0%;
+      background: var(--blue); opacity: 0.85;
+      clip-path: polygon(15% 0, 85% 0, 100% 100%, 0 100%); /* 梯形液面贴合瓶身 */
+      transition: height 0.9s linear;
+    }
+    .scene-flask .flask-bubbles { position: absolute; left: 30%; bottom: 20%; display: none; }
+    .scene-flask.active .flask-bubbles { display: block; }
+    .scene-flask .flask-bubbles i {
+      position: absolute; width: 4px; height: 4px; background: #fff; border-radius: 0;
+      animation: bubbleUp 1.2s steps(5) infinite;
+    }
+    .scene-flask .flask-bubbles i:nth-child(2) { left: 6px; animation-delay: 0.4s; }
+    @keyframes bubbleUp { to { transform: translateY(-22px); opacity: 0; } }
+    .scene-flask-info { font-size: 11px; font-weight: 800; color: var(--text-1); padding-bottom: 6px; }
+    /* —— 市政厅天际线：楼宇=需求，货箱=积压，亮窗=繁荣 —— */
+    #city-scene { height: 72px; display: flex; align-items: flex-end; gap: 8px; padding: 0 12px 6px; }
+    .scene-skyline { display: flex; align-items: flex-end; gap: 3px; }
+    .scene-skyline .tower {
+      width: 16px; border: 2px solid var(--line); border-bottom: none;
+      background:
+        repeating-linear-gradient(0deg, transparent 0 5px, var(--win, #3a3a44) 5px 8px),
+        #6a6a76;
+      transition: height 0.9s linear;
+    }
+    .scene-skyline .tower.lit { --win: #ffe08a; }
+    .scene-crates { display: flex; align-items: flex-end; gap: 2px; flex-wrap: wrap; max-width: 130px; font-size: 11px; }
+    .scene-crates .crate { animation: crateIn 0.3s steps(4); }
+    @keyframes crateIn { 0% { transform: translateY(-8px); opacity: 0; } }
+    .scene-city-info { margin-left: auto; font-size: 10px; font-weight: 800; color: var(--text-2); padding-bottom: 3px; text-align: right; }
+
+    /* ===== 状态条：💡 下一步提示 + 最新日志（同行一条，不占额外高度） ===== */
+    #statusbar {
+      display: flex; align-items: center; gap: 8px;
+      background: #4a4a52; border-radius: 2px; padding: 4px 10px;
+      border: 3px solid var(--line);
+      font-size: 10.5px; color: #d8d2c2; line-height: 1.6; font-weight: 600;
+      overflow: hidden;
+    }
+    #log { flex: 1; min-width: 0; overflow: hidden; }
+    /* 只保留最新一条消息，单行省略收尾 */
+    #log div {
+      display: block;
       overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
     }
-    #log div { display: inline-block; margin-right: 16px; }
-    #log::-webkit-scrollbar, .modal::-webkit-scrollbar { width: 6px; }
-    #log::-webkit-scrollbar-thumb, .modal::-webkit-scrollbar-thumb {
+    #log div:first-child { color: #fff8e7; }
+    .modal::-webkit-scrollbar { width: 6px; }
+    .modal::-webkit-scrollbar-thumb {
       background: var(--line-soft); border-radius: 3px;
     }
 
@@ -510,7 +844,7 @@
     .modal-overlay.visible { display: flex; }
     .modal {
       background: var(--bg-2);
-      border-radius: 18px; padding: 24px 22px;
+      border-radius: 3px; padding: 24px 22px;
       max-width: 380px; width: 92%;
       border: 2.5px solid var(--line);
       box-shadow: 6px 6px 0 rgba(51,48,42,0.9);
@@ -546,7 +880,7 @@
     @keyframes enrouteCardIn { 0% { opacity: 0; transform: translateX(80px); } 100% { opacity: 1; transform: translateX(0); } }
     @keyframes enrouteCardOut { 0% { opacity: 1; } 100% { opacity: 0; transform: translateX(40px); } }
     .enroute-card {
-      position: fixed; right: 12px; bottom: 12px; z-index: 60;
+      position: fixed; right: 12px; bottom: 96px; z-index: 60;
       width: 250px; padding: 10px 12px;
       background: var(--bg-2);
       border: 2px solid var(--line); border-left: 5px solid var(--gold);
@@ -561,7 +895,7 @@
       margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .enroute-card-countdown {
-      height: 5px; border-radius: 999px; overflow: hidden;
+      height: 5px; border-radius: 2px; overflow: hidden;
       background: var(--bg-3); border: 1px solid var(--line);
       margin: 7px 0 2px;
     }
@@ -589,7 +923,7 @@
     }
     .enroute-card-choice-summary { font-size: 10px; font-weight: 700; opacity: 0.92; }
 
-    .badge { display: inline-block; font-size: 9px; padding: 1px 6px; border-radius: 999px; margin-left: 3px; border: 1.5px solid; }
+    .badge { display: inline-block; font-size: 9px; padding: 1px 6px; border-radius: 2px; margin-left: 3px; border: 1.5px solid; }
     .badge.rare { background: #efe4f8; color: var(--purple); border-color: var(--purple); }
 
     /* ===== 飘字动画 ===== */
@@ -628,7 +962,7 @@
     @keyframes toastIn { 0% { opacity:0; transform:translateX(80px); } 100% { opacity:1; transform:translateX(0); } }
     @keyframes toastOut { 0% { opacity:1; } 100% { opacity:0; transform:translateX(40px); } }
     #toast-container {
-      position: fixed; top: 12px; right: 12px; z-index: 500;
+      position: fixed; top: 56px; right: 12px; z-index: 500;
       display: flex; flex-direction: column; gap: 6px; max-width: 280px;
     }
     .toast {
@@ -655,7 +989,7 @@
 
     .tutorial-box {
       background: #fdf3d8;
-      border: 2.5px solid var(--line); border-radius: 18px;
+      border: 2.5px solid var(--line); border-radius: 3px;
       padding: 18px 20px; max-width: 360px; width: 100%;
       box-shadow: 6px 6px 0 rgba(51,48,42,0.9);
       text-align: center;
@@ -714,21 +1048,18 @@
     .tutorial-box.longterm .desc { font-size: 12px; margin-bottom: 8px; }
     .tutorial-box.longterm .step-indicator { color: var(--gold-strong); }
 
-    /* ===== 💡 下一步提示条（M5）：贴纸风横幅，醒目但不喧宾夺主 ===== */
+    /* ===== 💡 下一步提示（M5）：内嵌在底部状态条左段，不独占一行 ===== */
     #hint-bar {
-      display: none; align-items: center; gap: 8px;
-      padding: 8px 14px;
-      background: #fdf3d8;
-      border: 2px solid var(--gold-deep); border-radius: var(--r-m);
-      box-shadow: var(--shadow-1);
-      font-size: 12px; font-weight: 700; color: var(--gold-ink);
-      cursor: pointer; user-select: none;
-      transition: transform 0.12s, box-shadow 0.12s;
+      display: none; align-items: center; gap: 6px;
+      max-width: 62%; min-width: 0;
+      padding-right: 9px; margin-right: 1px;
+      border-right: 1.5px solid rgba(255,253,246,0.25);
+      font-size: 11px; font-weight: 700; color: #ffe08a;
+      cursor: pointer; user-select: none; white-space: nowrap;
     }
-    #hint-bar:hover { transform: translate(-1px,-1px); box-shadow: var(--shadow-2); }
-    #hint-bar:active { transform: translate(1px,1px); box-shadow: none; }
-    #hint-bar .hint-text { flex: 1; }
-    #hint-bar .hint-arrow { font-weight: 900; color: var(--gold-strong); }
+    #hint-bar:hover { color: #fff3c4; }
+    #hint-bar .hint-text { overflow: hidden; text-overflow: ellipsis; }
+    #hint-bar .hint-arrow { font-weight: 900; flex-shrink: 0; }
   </style>
 </head>
 <body>
@@ -738,7 +1069,7 @@
       <span class="resource"><span class="icon">🪙</span><span class="value" id="gold">0</span></span>
       <span class="resource"><span class="icon">⚙️</span><span class="value parts" id="parts">0</span></span>
       <span class="resource" title="能源：电站产出，造车/升级规格/派单都要用电"><span class="icon">⚡</span><span class="value energy" id="energy">0/0</span></span>
-      <span class="resource" title="声望：企业品牌口碑，高阶车型的市场准入"><span class="icon">📈</span><span class="value rep" id="reputation">0</span></span>
+      <span class="resource" title="声望：高阶车型市场准入 / 贵重单入场费（10📈）。获取：完成订单 +tier×系数（普通×1 长途×2 贵重×4）· 每车型首台下线 +20×tier · 📣营销推广 2 分钟翻倍"><span class="icon">📈</span><span class="value rep" id="reputation">0</span></span>
       <span id="eps">0/s</span>
       <span id="tier-label">🛴 T1</span>
       <span id="vehicle-status-icons" style="display:flex;gap:4px;align-items:center;"></span>
@@ -753,37 +1084,84 @@
         <button class="btn btn-secondary" id="btn-expand">🏠 扩建</button>
       </div>
       <div id="build-tier-info" class="build-info"></div>
+      <!-- 制造按钮禁用原因（常驻可见，不依赖悬停） -->
+      <div id="build-blocker" class="build-info blocker" style="display:none;"></div>
       <!-- 建造进度（M7）：建造槽倒计时 + 排队列表 -->
       <div id="build-status" style="display:none;width:100%;"></div>
     </div>
 
-    <!-- 💡 下一步提示条（M5）：教程结束后常驻，点击跳转对应操作 -->
-    <div id="hint-bar"></div>
-
     <!-- 主区域：车库 + 订单同屏展示（无页面滚动）；工厂/科技/成就面板切换时占据同一区域 -->
     <main id="main-area">
-      <div id="main-home">
+      <div id="main-home" class="city-map">
+        <!-- 城区街道：5 栋功能建筑（点击开对应面板，徽标实时状态）+ 点阵道路 -->
+        <div class="map-street-wrap">
+          <div id="map-street">
+            <button class="map-bld" id="map-bld-factory" data-map-tab="factory" style="--roof:#c9574f;--wall:#f0e2c4;">
+              <span class="bld-smoke"><i></i><i></i><i></i></span>
+              <span class="bld-icon">🏭</span><span class="bld-name">工厂</span>
+              <span class="bld-badge" id="map-badge-factory">Lv.1</span>
+            </button>
+            <button class="map-bld" id="map-bld-power" data-map-tab="factory" style="--roof:#e8a33d;--wall:#f5e7c6;">
+              <span class="bld-spark">⚡</span>
+              <span class="bld-icon">⚡</span><span class="bld-name">电站</span>
+              <span class="bld-badge" id="map-badge-power">0%</span>
+            </button>
+            <button class="map-bld" id="map-bld-tech" data-map-tab="tech" style="--roof:#5b7fb8;--wall:#e8e4d8;">
+              <span class="bld-lab">🧪</span>
+              <span class="bld-icon">🔬</span><span class="bld-name">研究院</span>
+              <span class="bld-badge" id="map-badge-tech">空闲</span>
+            </button>
+            <button class="map-bld" id="map-bld-city" data-map-tab="city" style="--roof:#7a6a8f;--wall:#ece4d0;">
+              <span class="bld-icon">🏛️</span><span class="bld-name">市政厅</span>
+              <span class="bld-badge" id="map-badge-city">畅通</span>
+            </button>
+            <button class="map-bld" id="map-bld-achievements" data-map-tab="achievements" style="--roof:#c9a44a;--wall:#f3e9cc;">
+              <span class="bld-icon">🏆</span><span class="bld-name">荣誉馆</span>
+              <span class="bld-badge" id="map-badge-achievements">0/0</span>
+            </button>
+          </div>
+          <div id="map-road"><span id="map-cars"></span></div>
+        </div>
+
+        <div class="map-plots">
+        <div class="map-plot parking">
         <div id="garage">
           <div class="section-title">
-            🚗 车库 · <span id="garage-count">0</span>/<span id="garage-max">6</span>
-            <span style="float:right;font-weight:400;font-size:10px;color:var(--text-3);">点击车辆查看详情 · 大车占更多车位</span>
+            🅿️ 停车场 · <span id="garage-count">0</span>/<span id="garage-max">8</span>
+            <span style="float:right;font-weight:400;font-size:10px;">点击车辆查看详情 · 大车占更多车位</span>
           </div>
           <div class="vehicle-grid" id="garage-grid"></div>
         </div>
+        </div>
 
+        <div class="map-plot depot">
         <div id="orders-wrap">
           <div class="section-title">
-            📋 运输订单
+            📦 货运站
             <button id="btn-marketing" class="btn btn-gold" style="float:right;padding:2px 10px;font-size:10px;border-radius:999px;">📣 营销推广</button>
-            <span style="float:right;font-weight:400;font-size:10px;color:var(--text-3);margin-right:8px;line-height:22px;">派车出去赚钱 ↑</span>
           </div>
           <div id="orders"></div>
+        </div>
+        </div>
         </div>
       </div>
 
       <!-- 面板（切 Tab 时占据主区域） -->
     <div class="panel" id="panel-factory">
       <div class="section-title">🏭 零件工厂 Lv.<span id="factory-level">1</span>/<span id="factory-level-max">10</span> <span class="rank-pips" id="factory-pips"></span></div>
+      <!-- 像素车间场景：楼层=等级 · 传送带 · 在造车辆成型 · 建造队列 -->
+      <div class="scene" id="factory-scene">
+        <span class="scene-label">生产车间</span>
+        <div class="scene-floors" id="scene-floors"></div>
+        <div class="scene-belt">
+          <div class="scene-build idle" id="scene-build">
+            <span class="parts">⚙️</span> <span class="arrow">→</span>
+            <div class="wip" id="scene-wip">🚗</div>
+            <div class="wip-pct" id="scene-wip-pct"></div>
+          </div>
+          <div class="scene-queue" id="scene-queue"></div>
+        </div>
+      </div>
       <div id="factory-info" style="padding:8px 0;">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg-0);border:1.5px solid var(--line-soft);border-radius:8px;margin-bottom:6px;">
           <span>⚙️ 产出速率</span>
@@ -810,6 +1188,15 @@
 
       <!-- 电站（M8）：企业的动力源，时代名称随科技等级演进 -->
       <div class="section-title" style="margin-top:14px;">⚡ <span id="power-name">燃煤锅炉</span> Lv.<span id="power-level">1</span>/<span id="power-level-max">10</span> <span class="rank-pips" id="power-pips"></span></div>
+      <!-- 像素储罐场景：液位=储能%，超负荷罐体震动 -->
+      <div class="scene" id="power-scene">
+        <span class="scene-label">储能罐</span>
+        <div class="scene-tank" id="scene-tank">
+          <div class="tank-liquid" id="tank-liquid"></div>
+          <div class="tank-bolt">⚡</div>
+        </div>
+        <div class="scene-tank-info" id="tank-info"></div>
+      </div>
       <div style="padding:8px 0;">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg-0);border:1.5px solid var(--line-soft);border-radius:8px;margin-bottom:6px;">
           <span>⚡ 产出速率</span>
@@ -835,6 +1222,16 @@
 
     <div class="panel" id="panel-tech">
       <div class="section-title">🔬 科技树</div>
+      <!-- 像素实验室场景：烧瓶液位=研究进度，空闲灰暗 -->
+      <div class="scene" id="tech-scene">
+        <span class="scene-label">实验室</span>
+        <div class="scene-flask" id="scene-flask">
+          ⚗️
+          <div class="flask-liquid" id="flask-liquid"></div>
+          <div class="flask-bubbles"><i></i><i></i></div>
+        </div>
+        <div class="scene-flask-info" id="flask-info">研究槽空闲</div>
+      </div>
       <div id="tech-summary" style="padding:4px 2px 8px;font-size:12px;color:var(--text-2);font-weight:700;"></div>
       <div class="tech-tree" id="tech-tree"></div>
       <div class="section-title" style="margin-top:10px;">🧪 辅助科技</div>
@@ -842,21 +1239,21 @@
       <p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px;">💡 主线科技解锁新车型 · 子科技挂在主线等级下逐阶深化 · 辅助科技提供永久被动加成（3 阶制，可全研究）</p>
     </div>
 
+    <div class="panel" id="panel-city"></div>
+
     <div class="panel" id="panel-achievements">
       <div class="section-title">🏆 成就 · <span id="achieve-count">0</span>/<span id="achieve-total">7</span></div>
       <div id="achieve-list"></div>
     </div>
+
+    <!-- 面板打开时的返回入口（tabs.ts 控制显隐） -->
+    <button id="btn-back-home">🏡 返回园区</button>
     </main>
 
-    <!-- 日志 -->
-    <div id="log"></div>
-
-    <!-- 底部导航 -->
-    <div id="bottombar">
-      <button class="active" data-tab="garage">🚗 车库</button>
-      <button data-tab="factory">🏭 工厂</button>
-      <button data-tab="tech">🔬 科技</button>
-      <button data-tab="achievements">🏆 成就</button>
+    <!-- 状态条：💡 下一步提示（可点击跳转） + 最新日志，同行不占额外高度 -->
+    <div id="statusbar">
+      <div id="hint-bar"></div>
+      <div id="log"></div>
     </div>
   </div>
 

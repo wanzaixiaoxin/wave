@@ -7,7 +7,9 @@
 import { GameState, Quality, qualityRank } from '../core/types';
 import { getUnlockedConfigs, getOccupiedSpaces } from '../config/VehicleConfig';
 import { getTechConfig } from '../config/TechConfig';
+import { getCityPressureTier } from '../systems/CitySystem';
 import { getState, getSystems } from './context';
+import { showTab } from './tabs';
 import { isTutorialActive } from './tutorial';
 import { showVehicleDetail } from './garage';
 
@@ -56,7 +58,19 @@ export function computeHint(state: GameState, nextTech: NextTechInfo | null): Hi
     };
   }
 
-  // 2. 车库已满或差 1 格满（S2a 占格数口径，含建造队列预留） → 切车库 Tab（扩建/拆解）
+  // 2. 城市货运积压（S4 核心压力）：L2 拥堵以上 → 切城市 Tab（派车/扩车队/投基建）
+  const pressure = getCityPressureTier(state);
+  if (pressure >= 2) {
+    return {
+      icon: '🏙️',
+      text: pressure >= 3
+        ? `城市运输瘫痪边缘！积压 ${Math.floor(state.city.backlog)} 单位，订单槽 -1——全力派车或扩建车队`
+        : `城市货运拥堵（积压 ${Math.floor(state.city.backlog)} 单位），耗时增加还掉信誉，快多派车`,
+      action: { type: 'tab', tab: 'city' },
+    };
+  }
+
+  // 3. 车库已满或差 1 格满（S2a 占格数口径，含建造队列预留） → 切车库 Tab（扩建/拆解）
   const used = getOccupiedSpaces(state);
   const free = state.garage.maxCapacity - used;
   if (free <= 1 && state.garage.maxCapacity > 0) {
@@ -140,8 +154,7 @@ function executeHint(hint: Hint): void {
   const action = hint.action;
   switch (action.type) {
     case 'tab': {
-      // 复用底部导航已有绑定，直接模拟点击对应 Tab
-      (document.querySelector(`#bottombar [data-tab="${action.tab}"]`) as HTMLElement | null)?.click();
+      showTab(action.tab);
       break;
     }
     case 'vehicle': {

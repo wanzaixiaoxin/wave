@@ -45,7 +45,7 @@ export function getResidualValue(state: GameState, vehicle: Vehicle): number {
   const paidCost = Math.floor(config.buildCost * getUpgradeMult(state, 'build_cost'));
   const mileageFactor = Math.max(
     GAME_CONSTANTS.RESIDUAL_MIN_RATIO,
-    1 - vehicle.mileage / getMileageLifespan(vehicle.tier)
+    1 - vehicle.mileage / getMileageLifespan(vehicle.tier, vehicle.stats.durability)
   );
   const wearFactor = 1 - vehicle.wear / GAME_CONSTANTS.RESIDUAL_WEAR_FACTOR;
   return Math.floor(paidCost * mileageFactor * wearFactor);

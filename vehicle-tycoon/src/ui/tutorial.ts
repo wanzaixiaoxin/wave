@@ -59,8 +59,8 @@ const TUTORIAL_STEPS: TutorialStep[] = [
   },
   {
     title: '🔬 研究一次科技',
-    desc: '点底部「🔬 科技」标签，研究主线科技解锁新车型\n\nL2「内燃机」需要先造 5 辆 T3 马车，慢慢攒',
-    target: '[data-tab="tech"]',
+    desc: '点城区街道上的「🔬 研究院」，研究主线科技解锁新车型\n\nL2「内燃机」需要先造 5 辆 T3 马车，慢慢攒',
+    target: '#map-bld-tech',
     advanceOn: GameEvent.TECH_RESEARCHED,
     manual: false,
     longterm: true,

@@ -11,6 +11,7 @@ import { TechSystem } from '../systems/TechSystem';
 import { EconomySystem } from '../systems/EconomySystem';
 import { AchievementSystem } from '../systems/AchievementSystem';
 import { EventSystem } from '../systems/EventSystem';
+import { CitySystem } from '../systems/CitySystem';
 import { SaveManager } from './SaveManager';
 
 export class GameLoop {
@@ -29,6 +30,7 @@ export class GameLoop {
   private economySys!: EconomySystem;
   private achievementSys!: AchievementSystem;
   private eventSys!: EventSystem;
+  private citySys!: CitySystem;
 
   constructor(state: GameState) {
     this.state = state;
@@ -43,6 +45,7 @@ export class GameLoop {
     this.economySys = new EconomySystem(this.state);
     this.achievementSys = new AchievementSystem(this.state);
     this.eventSys = new EventSystem(this.state);
+    this.citySys = new CitySystem(this.state);
   }
 
   // ==================== 启动/停止 ====================
@@ -110,6 +113,7 @@ export class GameLoop {
     this.techSys.tick(1);              // 研究计时结算（M7）
     this.eventSys.tick(1);             // 随机事件判定
     this.achievementSys.tick();        // 成就判定
+    this.citySys.tick(1);              // S4 城市需求/积压/繁荣
 
     // 自动派单（设置开启时，每秒尝试把空闲车派给待接订单）
     if (this.state.settings.autoCollectOrders) {
@@ -141,6 +145,7 @@ export class GameLoop {
     economySys: EconomySystem;
     achievementSys: AchievementSystem;
     eventSys: EventSystem;
+    citySys: CitySystem;
   } {
     return {
       vehicleSys: this.vehicleSys,
@@ -150,6 +155,7 @@ export class GameLoop {
       economySys: this.economySys,
       achievementSys: this.achievementSys,
       eventSys: this.eventSys,
+      citySys: this.citySys,
     };
   }
 }

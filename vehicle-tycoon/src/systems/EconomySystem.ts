@@ -6,9 +6,10 @@ import { EventBus } from '../core/EventBus';
 import { GameEvent, GameState, Vehicle, Quality, OrderType, Specialization } from '../core/types';
 import { getVehicleConfig } from '../config/VehicleConfig';
 import { getTraitConfig } from '../config/TraitConfig';
-import { GAME_CONSTANTS, garageExpandCost, getBreakinBonus } from '../config/GameConstants';
+import { GAME_CONSTANTS, garageExpandCost, getBreakinBonus, cargoIncomeMult } from '../config/GameConstants';
 import { getEventMultiplier } from './EventSystem';
 import { getResidualValue } from './VehicleSystem';
+import { getCityIncomeMult } from './CitySystem';
 
 /**
  * 科技 L5 全厂收入倍率（唯一实现，OrderSystem / EconomySystem 共用）
@@ -89,8 +90,16 @@ export class EconomySystem {
     }
 
     if (state) {
-      // 载货属性：每级收入 +4%
-      income = Math.floor(income * (1 + vehicle.stats.cargo * GAME_CONSTANTS.CARGO_INCOME_PER_LEVEL));
+      // S4 城市乘区：压力惩罚（客户压价）× 繁荣加成 × 城际走廊项目
+      income = Math.floor(income * getCityIncomeMult(state));
+
+      // 载货属性：递进曲线加成（满级 +25%）
+      income = Math.floor(income * cargoIncomeMult(vehicle.stats.cargo));
+
+      // 载货 L3 断点：贵重单收入 +15%（大件运输车吃高价单）
+      if (orderType === OrderType.Valuable && vehicle.stats.cargo >= 3) {
+        income = Math.floor(income * (1 + GAME_CONSTANTS.CARGO_L3_VALUABLE_BONUS));
+      }
 
       // 重载出厂参数：载货加成转化为收入加成
       if (vehicle.trait) {
@@ -115,16 +124,21 @@ export class EconomySystem {
         income = Math.floor(income * GAME_CONSTANTS.WEAR_INCOME_MULT);
       }
 
-      // 疲劳递减：连续接单每单 -8%（下限 ×0.6），逼玩家轮班经营
+      // 疲劳递减：连续接单每单 -8%（下限 ×0.6），逼玩家轮班经营；速度 L3 断点：衰减减半
+      const fatigueDecay = GAME_CONSTANTS.FATIGUE_DECAY *
+        (vehicle.stats.speed >= 3 ? GAME_CONSTANTS.SPEED_L3_FATIGUE_MULT : 1);
       const fatigueMult = Math.max(
         GAME_CONSTANTS.FATIGUE_MIN_MULT,
-        1 - vehicle.consecutiveOrders * GAME_CONSTANTS.FATIGUE_DECAY
+        1 - vehicle.consecutiveOrders * fatigueDecay
       );
       income = Math.floor(income * fatigueMult);
     }
 
-    // 暴击（基础 5%，含「精准」出厂参数暴击率加成、「幸运」出厂参数暴击倍率）
+    // 暴击（基础 5%，载货 L5 断点 +5%，含「精准」出厂参数暴击率加成、「幸运」出厂参数暴击倍率）
     let critRate = 0.05;
+    if (vehicle.stats.cargo >= GAME_CONSTANTS.STAT_MAX_LEVEL) {
+      critRate += GAME_CONSTANTS.CARGO_L5_CRIT_RATE;
+    }
     let critMult = GAME_CONSTANTS.CRIT_MULT_DEFAULT;
     if (vehicle.trait) {
       const tc = getTraitConfig(vehicle.trait);

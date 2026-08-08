@@ -11,7 +11,8 @@ import {
 import { getVehicleConfig } from '../config/VehicleConfig';
 import { getTraitConfig } from '../config/TraitConfig';
 import { getEnRouteEventConfig, rollEnRouteEvent } from '../config/EnRouteEventConfig';
-import { GAME_CONSTANTS, orderEnergyCost } from '../config/GameConstants';
+import { GAME_CONSTANTS, orderEnergyCost, speedDurationMult, durabilityWearReduction } from '../config/GameConstants';
+import { getCityOrderSlotDelta, getCityDurationMult } from './CitySystem';
 import { EconomySystem, getGlobalIncomeMult } from './EconomySystem';
 import { getEventMultiplier } from './EventSystem';
 import { getSideTechRank } from './TechSystem';
@@ -42,14 +43,14 @@ export class OrderSystem {
     this.orderGenTimer += deltaSeconds;
 
     // 订单供给随进度扩张：生成间隔 5-8 秒，
-    // 待接单上限随科技等级提升（L1:3 → L3:4 → L5:5）
+    // 待接单上限随科技等级提升（L1:3 → L3:4 → L5:5）；S4 城市槽位修正（L3 瘫痪 -1 / 智能调度中心 +1）
     let genInterval = 3.5 + Math.random() * 2;
     // 辅助科技「物流优化」（v1.3 3 阶制）：订单生成间隔 ×(1 - 7%×阶数)
     const logisticsRank = getSideTechRank(this.state, 'logistics');
     if (logisticsRank > 0) {
       genInterval *= 1 - GAME_CONSTANTS.SIDE_LOGISTICS_INTERVAL_PER_RANK * logisticsRank;
     }
-    const maxPending = 3 + this.state.techTree.currentLevel;
+    const maxPending = Math.max(1, 3 + this.state.techTree.currentLevel + getCityOrderSlotDelta(this.state));
     if (this.orderGenTimer >= genInterval) {
       this.orderGenTimer = 0;
       if (this.state.orders.filter(o => o.status === OrderStatus.Pending).length < maxPending) {
@@ -233,10 +234,10 @@ export class OrderSystem {
       order.lowPower = true;
     }
 
-    // 订单耗时加成：速度属性每级 -4%、高速出厂参数 ×0.85、
+    // 订单耗时加成：速度属性递进曲线减免（满级 -25%）、高速出厂参数 ×0.85、
     // 运营配置（快运 ×0.75 / 重载 ×1.15）、高磨损 ×1.2
     let duration = order.duration;
-    duration *= 1 - vehicle.stats.speed * GAME_CONSTANTS.SPEED_DURATION_PER_LEVEL;
+    duration *= speedDurationMult(vehicle.stats.speed);
     if (vehicle.trait) {
       const tc = getTraitConfig(vehicle.trait);
       if (tc?.effectType === 'speed') {
@@ -255,6 +256,8 @@ export class OrderSystem {
     if (order.lowPower) {
       duration *= GAME_CONSTANTS.ENERGY_SHORTAGE_DURATION_MULT;
     }
+    // S4 城市拥堵（L2+）：全单耗时 ×1.2（环城快速路网建成后 ×1.1）
+    duration *= getCityDurationMult(this.state);
     // 物流网络子科技（v1.3 统一乘区）：订单耗时 -5%/阶
     duration *= getUpgradeMult(this.state, 'order_duration');
     const departAt = Date.now();
@@ -454,10 +457,10 @@ export class OrderSystem {
       vehicle.status = VehicleStatus.Idle;
       vehicle.statusEndAt = 0;
 
-      // 磨损累积（耐用运营配置减半；耐久属性每级 -8%（S2a）；质控体系子科技 v1.3 统一乘区逐阶 -10%）与疲劳计数
+      // 磨损累积（耐用运营配置减半；耐久属性递进曲线减免（满级 -40%）；质控体系子科技 v1.3 统一乘区逐阶 -10%）与疲劳计数
       const wearGain = GAME_CONSTANTS.WEAR_PER_ORDER *
         (vehicle.specialization === Specialization.Steady ? GAME_CONSTANTS.SPEC_STEADY_WEAR_MULT : 1) *
-        (1 - vehicle.stats.durability * GAME_CONSTANTS.DURABILITY_WEAR_PER_LEVEL) *
+        (1 - durabilityWearReduction(vehicle.stats.durability)) *
         getUpgradeMult(this.state, 'wear');
       vehicle.wear = Math.min(GAME_CONSTANTS.WEAR_MAX, vehicle.wear + wearGain);
       vehicle.consecutiveOrders++;

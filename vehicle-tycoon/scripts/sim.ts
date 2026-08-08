@@ -26,6 +26,9 @@ import { getResidualValue } from '../src/systems/VehicleSystem';
 import { getUpgradeMult } from '../src/systems/UpgradeSystem';
 import { SUB_TECH_CONFIGS, RETROFIT_CONFIGS } from '../src/config/UpgradeConfig';
 import { SIDE_TECH_CONFIGS, getTechConfig } from '../src/config/TechConfig';
+import { CitySystem, getCityPressureTier } from '../src/systems/CitySystem';
+import { CITY_PROJECTS } from '../src/config/CityConfig';
+import { statUpgradeCost } from '../src/config/GameConstants';
 
 const state = SaveManager.createInitialState();
 const vehicleSys = new VehicleSystem(state);
@@ -33,6 +36,7 @@ const orderSys = new OrderSystem(state);
 const factorySys = new FactorySystem(state);
 const techSys = new TechSystem(state);
 const economySys = new EconomySystem(state);
+const citySys = new CitySystem(state);
 
 // 模拟玩家策略：路上事件触发后，在可选项内随机选一项立即决策
 EventBus.on(GameEvent.EN_ROUTE_EVENT_TRIGGERED, (...args: unknown[]) => {
@@ -90,7 +94,7 @@ function readRes(key: ResKey): number {
 const initialRes: Record<ResKey, number> = { gold: readRes('gold'), parts: readRes('parts'), energy: readRes('energy'), rep: readRes('rep') };
 
 // ---- 决策密度：每个成功动作计数，按 10 分钟分段 ----
-const ACTION_KEYS = ['造车入队', '主线研究', '子科技', '支线', '改造', '升规格', '置换', '出售', '翻新', '电站升级', '工厂升级', '营销', '超负荷'] as const;
+const ACTION_KEYS = ['造车入队', '主线研究', '子科技', '支线', '改造', '升规格', '属性升级', '置换', '出售', '翻新', '电站升级', '工厂升级', '营销', '超负荷', '基建投入'] as const;
 type ActionKey = typeof ACTION_KEYS[number];
 const zeroActions = (): Record<ActionKey, number> =>
   Object.fromEntries(ACTION_KEYS.map(k => [k, 0])) as Record<ActionKey, number>;
@@ -122,6 +126,16 @@ function ep(type: BottleneckType, active: boolean, t: number): void {
 // ---- 电力专项 ----
 let energyFullSeconds = 0;
 
+// ---- S4 城市专项：压力等级时长 / 繁荣升级 / 项目建成 ----
+const pressureSeconds = [0, 0, 0, 0];
+let prosperityUps = 0;
+let lastProjectInvest = -999; // 基建投入节流（秒）
+EventBus.on(GameEvent.CITY_PROSPERITY_UP, () => { prosperityUps++; });
+EventBus.on(GameEvent.CITY_PROJECT_COMPLETED, (...args: unknown[]) => {
+  const cfg = args[0] as { name: string };
+  mark(`建成${cfg.name}`);
+});
+
 // M8 收支统计：按每秒正负 delta 归因（正=产出/获取，负=消耗）
 let energyProduced = 0, energyConsumed = 0, repGained = 0, repSpent = 0;
 let lowPowerOrders = 0, energyZeroSeconds = 0;
@@ -131,6 +145,7 @@ EventBus.on(GameEvent.ORDER_COMPLETED, (...args: unknown[]) => {
 
 for (let t = 0; t < SIM_SECONDS; t++) {
   simTime += 1000;
+  state.stats.totalPlayTime += 1; // 对齐 GameLoop：城市需求随游玩时长增长
 
   const resBefore: Record<ResKey, number> = { gold: readRes('gold'), parts: readRes('parts'), energy: readRes('energy'), rep: readRes('rep') };
   // 本秒卡点标记（由下方策略代码填充）
@@ -141,6 +156,8 @@ for (let t = 0; t < SIM_SECONDS; t++) {
   orderSys.tick(1);
   vehicleSys.tick(1);
   techSys.tick(1); // M7：研究计时结算
+  citySys.tick(1); // S4：城市需求/积压/繁荣
+  pressureSeconds[getCityPressureTier(state)]++;
 
   // ---- 贪心玩家策略（每秒） ----
   // 1. 派单：高价单优先，派给能接的最低 tier 车
@@ -250,6 +267,44 @@ for (let t = 0; t < SIM_SECONDS; t++) {
         .sort((a, b) => a.st.cost!.gold - b.st.cost!.gold);
       if (affordable.length > 0) {
         if (factorySys.buyRetrofit(affordable[0].cfg.id)) act('改造', t);
+      }
+    }
+  }
+
+  // 3f. S4 城市基建投入：节流（20s）+ 储备（预留下一级主线费用）+ 压力驱动
+  // 平时只在资源真溢出时投（能源顶格/零件堆积/金币远超净资产）；
+  // 压力 ≥L2（拥堵）时放宽——投基建提升运力上限是正经的释压手段
+  {
+    const nextProject = CITY_PROJECTS.find(p => !citySys.getProjectProgress(p.id).done);
+    if (nextProject && t - lastProjectInvest >= 20) {
+      const next = techSys.getNextResearchable();
+      const nextCfg = next ? getTechConfig(next.level) : undefined;
+      const surplusGold = state.resources.gold - (nextCfg?.goldCost ?? 0);
+      const surplusParts = state.resources.parts - (nextCfg?.partsCost ?? 0);
+      const tier = getCityPressureTier(state);
+      const energyCapped = state.resources.energy >= factorySys.getEnergyCapacity() * 0.9;
+      const partsOverflow = surplusParts > 50000;
+      const goldOverflow = surplusGold > economySys.getNetWorth() * 0.5 && surplusGold > 20000;
+      const willing = tier >= 2
+        ? (surplusParts > 10000 || energyCapped || surplusGold > 50000)
+        : (energyCapped || partsOverflow || goldOverflow);
+      if (willing && citySys.investProject(nextProject.id).ok) {
+        act('基建投入', t);
+        lastProjectInvest = t;
+      }
+    }
+  }
+
+  // 3g. S4 属性升级：金币富余时给主力车队点载货/速度（提升交付能力，对抗积压）
+  {
+    const fleet = [...state.garage.vehicles].sort((a, b) => b.tier - a.tier).slice(0, 5);
+    for (const v of fleet) {
+      const key = v.stats.cargo <= v.stats.speed ? 'cargo' : 'speed';
+      const lv = v.stats[key];
+      if (lv >= GAME_CONSTANTS.STAT_MAX_LEVEL) continue;
+      const cost = statUpgradeCost(lv);
+      if (state.resources.gold >= cost * 10) {
+        if (vehicleSys.upgradeStat(v.id, key)) { act('属性升级', t); break; }
       }
     }
   }
@@ -374,6 +429,8 @@ for (let t = 0; t < SIM_SECONDS; t++) {
   }
   if (state.factory.level >= GAME_CONSTANTS.FACTORY_MAX_LEVEL) mark('工厂满级');
   if (state.factory.powerLevel >= GAME_CONSTANTS.POWER_MAX_LEVEL) mark('电站满级');
+  if (citySys.allProjectsDone()) mark('基建项目全建成');
+  if (state.city.prosperity >= GAME_CONSTANTS.CITY_PROSPERITY_MAX_LEVEL) mark('繁荣满级');
 
   // 每 5 分钟打印一次经济快照
   if (t % 300 === 299) {
@@ -382,7 +439,8 @@ for (let t = 0; t < SIM_SECONDS; t++) {
     console.log(
       `[${min}min] 🪙${Math.floor(state.resources.gold).toLocaleString()} ⚙️${Math.floor(state.resources.parts).toLocaleString()} ` +
       `⚡${Math.floor(state.resources.energy)} 📈${Math.floor(state.resources.reputation).toLocaleString()} ` +
-      `科技L${state.techTree.currentLevel} 电站L${state.factory.powerLevel} 订单${state.stats.totalOrdersCompleted} 车队[${fleet}]`
+      `科技L${state.techTree.currentLevel} 电站L${state.factory.powerLevel} 订单${state.stats.totalOrdersCompleted} ` +
+      `积压${Math.floor(state.city.backlog)} 繁荣${state.city.prosperity} 车队[${fleet}]`
     );
   }
 
@@ -419,6 +477,8 @@ console.log(`结束时声望: ${Math.floor(state.resources.reputation).toLocaleS
 console.log(`能源收支（M8）: 产出 ${Math.floor(energyProduced).toLocaleString()}⚡ / 消耗 ${Math.floor(energyConsumed).toLocaleString()}⚡`);
 console.log(`声望收支（M8）: 获取 ${Math.floor(repGained).toLocaleString()}📈 / 消耗 ${Math.floor(repSpent).toLocaleString()}📈（贵重单动用客户关系）`);
 console.log(`动力不足订单: ${lowPowerOrders}（占 ${(lowPowerOrders / Math.max(1, state.stats.totalOrdersCompleted) * 100).toFixed(1)}%）· 能源归零 ${energyZeroSeconds}s`);
+console.log(`S4 城市: 压力时长 L0/L1/L2/L3 = ${pressureSeconds.map(s => (s / 60).toFixed(0) + 'min').join('/')}` +
+  ` · 繁荣 Lv.${state.city.prosperity}（+${prosperityUps} 次）· 交付 ${Math.floor(state.city.deliveredTotal)} 单位`);
 console.log(`总订单数: ${state.stats.totalOrdersCompleted}`);
 console.log(`车库: ${state.garage.vehicles.map(v => 'T' + v.tier).join(', ')}`);
 // v1.3 深度升级结算：子科技/支线阶数与改造线等级
@@ -576,7 +636,28 @@ lines.push(`| 储能顶格时长 | ${energyFullSeconds}s（占比 ${(energyFullS
 lines.push(`| 期末储能 / 上限 | ${Math.floor(state.resources.energy)} / ${factorySys.getEnergyCapacity()}⚡（电站 L${state.factory.powerLevel}） |`);
 lines.push('');
 
-// 7. 结论区（留空）
+// 7. S4 城市专项
+lines.push('## 7. S4 城市需求压力专项');
+lines.push('');
+lines.push('| 指标 | 数值 |');
+lines.push('| --- | ---: |');
+const TIER_LABELS = ['L0 畅通', 'L1 紧张', 'L2 拥堵', 'L3 瘫痪边缘'];
+for (let i = 0; i < 4; i++) {
+  lines.push(`| ${TIER_LABELS[i]}时长占比 | ${fmtMin(pressureSeconds[i])}（${(pressureSeconds[i] / SIM_SECONDS * 100).toFixed(1)}%） |`);
+}
+lines.push(`| 繁荣等级 | Lv.${state.city.prosperity} / ${GAME_CONSTANTS.CITY_PROSPERITY_MAX_LEVEL}（升级 ${prosperityUps} 次） |`);
+lines.push(`| 累计交付 | ${fmtInt(state.city.deliveredTotal)} 单位 |`);
+lines.push(`| 期末积压 | ${fmtInt(state.city.backlog)} 单位 |`);
+const projDone = CITY_PROJECTS.filter(p => citySys.getProjectProgress(p.id).done).length;
+lines.push(`| 基建项目建成 | ${projDone} / ${CITY_PROJECTS.length} |`);
+lines.push(`| 零件消耗率 | ${(flowTotal.parts.spent / Math.max(1, flowTotal.parts.gained) * 100).toFixed(1)}%（目标 ≥30%） |`);
+{
+  const late = actionBuckets.slice(10).reduce((s, a) => s + ACTION_KEYS.reduce((x, k) => x + a[k], 0), 0);
+  lines.push(`| 100min 后决策密度 | ${(late / (SIM_SECONDS / 60 - 100)).toFixed(1)} 次/min（目标 ≥1） |`);
+}
+lines.push('');
+
+// 8. 结论区（留空）
 lines.push('## 评审结论（由制作人填写）');
 lines.push('');
 lines.push('（待填写）');

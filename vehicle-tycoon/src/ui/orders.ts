@@ -4,7 +4,7 @@
 
 import { getState, getSystems, requestRender } from './context';
 import { Order, Vehicle } from '../core/types';
-import { GAME_CONSTANTS, orderEnergyCost } from '../config/GameConstants';
+import { GAME_CONSTANTS, orderEnergyCost, speedDurationMult } from '../config/GameConstants';
 import { getVehicleConfig } from '../config/VehicleConfig';
 import { getTraitConfig } from '../config/TraitConfig';
 import { renderPills, PillOption } from './pills';
@@ -28,7 +28,7 @@ const selectedVehicleByOrder: Record<string, string> = {};
 
 /** 预估耗时（速度属性/出厂参数折算，与派单口径一致） */
 function estimateDuration(v: Vehicle, o: Order): number {
-  let durMult = 1 - v.stats.speed * GAME_CONSTANTS.SPEED_DURATION_PER_LEVEL;
+  let durMult = speedDurationMult(v.stats.speed);
   const tc = v.trait ? getTraitConfig(v.trait) : undefined;
   if (tc?.effectType === 'speed') durMult *= tc.effectValue;
   return Math.max(1, Math.round(o.duration * durMult));

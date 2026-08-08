@@ -5,6 +5,7 @@
 export function showModal(title: string, body: string[], ...buttons: (string | (() => void))[]): void {
   const overlay = document.getElementById('modal-overlay')!;
   const content = document.getElementById('modal-content')!;
+  content.classList.remove('modal-vd'); // 车辆详情宽版样式不残留到通用弹窗
   content.innerHTML = `<h2>${title}</h2>${body.map(b => `<p>${b}</p>`).join('')}`;
 
   const btnRow = document.createElement('div');
@@ -34,4 +35,5 @@ export function showModal(title: string, body: string[], ...buttons: (string | (
 
 export function hideModal(): void {
   document.getElementById('modal-overlay')!.classList.remove('visible');
+  document.getElementById('modal-content')!.classList.remove('modal-vd');
 }

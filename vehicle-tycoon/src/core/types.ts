@@ -106,6 +106,10 @@ export enum GameEvent {
   RANDOM_EVENT_TRIGGERED = 'event:random_triggered',
   RANDOM_EVENT_EXPIRED = 'event:random_expired',
 
+  // S4 城市事件
+  CITY_PROSPERITY_UP = 'city:prosperity_up',
+  CITY_PROJECT_COMPLETED = 'city:project_completed',
+
   // 游戏状态
   GAME_TICK = 'game:tick',
   GAME_SAVED = 'game:saved',
@@ -114,9 +118,9 @@ export enum GameEvent {
 // ==================== 核心接口 ====================
 
 export interface VehicleStats {
-  speed: number;       // 0-5，每级订单耗时 -4%
-  cargo: number;       // 0-5，每级收入 +4%
-  durability: number;  // 0-5，≥3 可接长途单；每级每单磨损 -8%（S2a 修复 3 级后零收益）
+  speed: number;       // 0-5，递进曲线耗时减免（满级 -25%）；L3 疲劳减半，L5 免速度电费
+  cargo: number;       // 0-5，递进曲线收入加成（满级 +25%）；L3 贵重单 +15%，L5 暴击率 +5%
+  durability: number;  // 0-5，≥3 可接长途单；递进曲线磨损减免（满级 -40%）；L5 里程寿命 ×1.25
 }
 
 /**
@@ -297,6 +301,7 @@ export interface SaveData {
   achievements: Achievement[];
   stats: GameStats;
   settings: GameSettings;
+  city: CityState;
 }
 
 export interface OfflineResult {
@@ -431,6 +436,24 @@ export interface EnRouteEventConfigEntry {
 
 // ==================== 运行时状态 ====================
 
+/** S4 城市基建项目投入进度（分批捐赠） */
+export interface CityProjectProgress {
+  gold: number;
+  parts: number;
+  energy: number;
+  rep: number;
+  done: boolean;
+}
+
+/** S4 城市需求压力状态 */
+export interface CityState {
+  backlog: number;             // 积压运输需求（单位）
+  prosperity: number;          // 繁荣等级（每级全局收入 +5%，需求同步 +2/分）
+  prosperityProgress: number;  // 繁荣进度（0..CITY_PROSPERITY_PROGRESS_NEED）
+  deliveredTotal: number;      // 累计交付单位（城市面板展示用）
+  projects: Record<string, CityProjectProgress>; // 项目 id → 投入进度
+}
+
 export interface GameState {
   phase: 'playing';
   resources: Resources;
@@ -442,6 +465,7 @@ export interface GameState {
   achievements: Achievement[];
   stats: GameStats;
   settings: GameSettings;
+  city: CityState;
 }
 
 export interface UIState {

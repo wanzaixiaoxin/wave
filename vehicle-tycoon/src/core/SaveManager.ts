@@ -10,7 +10,7 @@ import { EconomySystem, getGlobalIncomeMult } from '../systems/EconomySystem';
 import { getUpgradeMult } from '../systems/UpgradeSystem';
 
 const SAVE_KEY = 'tycoon_save_v1';
-const SAVE_VERSION = '2.1'; // 2.1：纯经营转型 S2a（删等级/经验/传承池，里程+残值资产曲线）；老档不迁移，版本不匹配直接开新局
+const SAVE_VERSION = '2.4'; // 2.4：S4 城市需求压力系统（新增 city 字段），老档不迁移，版本不匹配直接开新局
 const MAX_OFFLINE_SECONDS = 2 * 3600; // 2 hours
 const OFFLINE_EFFICIENCY = 0.4;
 
@@ -33,6 +33,7 @@ export class SaveManager {
         achievements: state.achievements,
         stats: state.stats,
         settings: state.settings,
+        city: state.city,
       };
       const json = JSON.stringify(data);
       localStorage.setItem(SAVE_KEY, json);
@@ -170,7 +171,7 @@ export class SaveManager {
       phase: 'playing',
       resources: { gold: 200, parts: 0, energy: GAME_CONSTANTS.INITIAL_ENERGY, reputation: 0 },
       garage: {
-        maxCapacity: 6,
+        maxCapacity: GAME_CONSTANTS.GARAGE_INITIAL_CAPACITY,
         vehicles: [],
         buildQueue: [],
       },
@@ -208,6 +209,13 @@ export class SaveManager {
         soundEnabled: true,
         musicEnabled: true,
         autoCollectOrders: false,
+      },
+      city: {
+        backlog: 0,
+        prosperity: 0,
+        prosperityProgress: 0,
+        deliveredTotal: 0,
+        projects: {},
       },
     };
   }

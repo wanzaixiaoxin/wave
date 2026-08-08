@@ -10,6 +10,7 @@ import { getSubTechsOfLevel, RETROFIT_CONFIGS } from '../config/UpgradeConfig';
 import { GAME_CONSTANTS, buildEnergyCost } from '../config/GameConstants';
 import { getBuildQueueMax } from '../systems/FactorySystem';
 import { getUpgradeMult } from '../systems/UpgradeSystem';
+import { getEffectivePartsCost } from '../systems/TechSystem';
 import { renderPills, PillOption } from './pills';
 import { showToast } from './toast';
 import { addLog } from './log';
@@ -70,12 +71,12 @@ export function updateStatusIcons(): void {
 
 let lastBuildTier: string | null = null;
 
-/** 当前是否买得起某 tier（金币/零件/能源全维度，与 createVehicle 同口径） */
+/** 当前是否买得起某 tier（金币/零件/能源全维度，与 createVehicle 同口径：零件走精益制造折后价） */
 function canAffordBuild(s: GameState, tier: number): boolean {
   const cfg = getVehicleConfig(tier);
   if (!cfg) return false;
   return s.resources.gold >= Math.floor(cfg.buildCost * getUpgradeMult(s, 'build_cost'))
-    && s.resources.parts >= cfg.partsCost
+    && s.resources.parts >= getEffectivePartsCost(s, cfg.partsCost)
     && s.resources.energy >= buildEnergyCost(tier);
 }
 
@@ -135,6 +136,7 @@ export function buildTierOptions(): void {
     const unlockedPills = pills.filter(o => !o.disabled);
     const affordable = unlockedPills.filter(o => canAffordBuild(s, parseInt(o.value, 10)));
     sel = (affordable[affordable.length - 1] ?? unlockedPills[unlockedPills.length - 1] ?? null)?.value ?? null;
+    lastBuildTier = sel; // 默认选中必须回写：制造按钮/信息行/禁用判定都读 lastBuildTier，不回写则点击制造静默无效
   }
 
   renderPills(container, pills, sel, (v) => { lastBuildTier = v; });
@@ -146,7 +148,8 @@ export function buildTierOptions(): void {
     if (cfg) {
       const effCost = Math.floor(cfg.buildCost * getUpgradeMult(s, 'build_cost'));
       const effTime = Math.max(1, Math.round(cfg.buildTime * getUpgradeMult(s, 'build_time')));
-      const partsStr = cfg.partsCost > 0 ? `${cfg.partsCost}⚙️ ` : '';
+      const effParts = getEffectivePartsCost(s, cfg.partsCost); // 与 createVehicle 同口径：精益制造折后价
+      const partsStr = effParts > 0 ? `${effParts}⚙️ ` : '';
       const energyStr = `${buildEnergyCost(cfg.tier)}⚡`;
       const afford = canAffordBuild(s, cfg.tier);
       infoEl.innerHTML = `${cfg.emoji} ${cfg.name} · 占${cfg.parkingSpaces}格 · ` +
@@ -175,27 +178,55 @@ export function renderWorkbench(): void {
   const queueFull = queue.length >= 1 + getBuildQueueMax(s);
   const selectedTier = getBuildTierSelection();
   const selectedSpaces = selectedTier > 0 ? getParkingSpaces(selectedTier) : 0;
-  const reservedFull = getOccupiedSpaces(s) + selectedSpaces > s.garage.maxCapacity;
+  const occupied = getOccupiedSpaces(s);
+  const reservedFull = occupied + selectedSpaces > s.garage.maxCapacity;
   const unmet = selectedTier > 0 ? getUnmetRequirements(s, selectedTier) : [];
   const locked = unmet.length > 0;
   const energyShort = selectedTier > 0 && s.resources.energy < buildEnergyCost(selectedTier);
+  // 禁用原因：按钮 title（悬停）+ 工作台常驻红字（不悬停也看得见）双通道
+  const blockReason = queueFull
+    ? '建造队列已满，等造完再来'
+    : reservedFull
+      ? `车位不足：需要 ${selectedSpaces} 格，仅剩 ${s.garage.maxCapacity - occupied} 格（${occupied}/${s.garage.maxCapacity}，含建造预留），请扩建或拆解`
+      : locked
+        ? `还未解锁：${unmet.join(' · ')}`
+        : energyShort
+          ? `能源不足：造车需要 ${buildEnergyCost(selectedTier)}⚡（当前 ${Math.floor(s.resources.energy)}⚡），升级电站或等充电`
+          : '';
   if (btn) {
-    btn.disabled = queueFull || reservedFull || locked || energyShort;
-    btn.title = queueFull
-      ? '建造队列已满，等造完再来'
-      : reservedFull
-        ? '车库已满（含建造中的车），请扩建或拆解'
-        : locked
-          ? `还未解锁：${unmet.join(' · ')}`
-          : energyShort
-            ? `能源不足：造车需要 ${buildEnergyCost(selectedTier)}⚡，升级电站或等充电`
-            : '';
+    btn.disabled = blockReason !== '';
+    btn.title = blockReason;
+  }
+  const blockerEl = document.getElementById('build-blocker');
+  if (blockerEl) {
+    // 槽位常驻（CSS min-height 占位）：只换文字，不切 display，避免顶动下方车库/订单
+    blockerEl.textContent = blockReason ? `⛔ ${blockReason}` : '';
+    blockerEl.style.display = 'block';
+  }
+
+  // 扩建按钮：实时显示费用，满级/金币不足置灰并注明原因（与制造按钮同口径）
+  const expandBtn = document.getElementById('btn-expand') as HTMLButtonElement | null;
+  if (expandBtn) {
+    const nextCost = getSystems().economySys.getNextExpandCost();
+    if (nextCost < 0) {
+      expandBtn.textContent = `🏠 已满（${s.garage.maxCapacity}格）`;
+      expandBtn.disabled = true;
+      expandBtn.title = '车库已达最大容量';
+    } else {
+      expandBtn.textContent = `🏠 扩建 +${GAME_CONSTANTS.GARAGE_EXPAND_SPACES}格 (${nextCost.toLocaleString()}🪙)`;
+      expandBtn.disabled = s.resources.gold < nextCost;
+      expandBtn.title = expandBtn.disabled ? `金币不足，扩建需要 ${nextCost.toLocaleString()}🪙` : '';
+    }
   }
 
   if (!box) return;
   if (queue.length === 0) {
-    box.innerHTML = '';
-    box.style.display = 'none';
+    // 槽位常驻：空闲时同样渲染「状态行 + 空进度条」，高度与建造中一致，版面零跳动
+    box.innerHTML = `
+      <div class="build-active"><span style="color:var(--text-3)">🔨 建造槽空闲 · 点击「制造」开工</span><span class="build-queue"></span></div>
+      <div class="build-progress"><div class="build-progress-bar" style="width:0%"></div></div>
+    `;
+    box.style.display = 'block';
     return;
   }
   box.style.display = 'block';
@@ -235,6 +266,7 @@ export function renderFactory(): void {
     '●'.repeat(s.factory.level) + '○'.repeat(fs.getMaxLevel() - s.factory.level);
   document.getElementById('factory-pps')!.textContent = fs.getPartsPerSecond().toFixed(2);
   document.getElementById('factory-lines-count')!.textContent = fs.getLineCount().toString();
+  updateFactoryScene(s, fs);
 
   // 进度系数（M7）：让玩家感知工厂随最高车型变强
   const tierEl = document.getElementById('factory-tier-bonus');
@@ -294,6 +326,7 @@ export function renderFactory(): void {
   document.getElementById('power-stock')!.textContent = `${Math.floor(s.resources.energy)} / ${cap}`;
   (document.getElementById('power-bar') as HTMLElement).style.width =
     `${Math.min(100, (s.resources.energy / cap) * 100)}%`;
+  updatePowerScene(s, cap);
 
   const pCost = fs.getPowerUpgradeCost();
   document.getElementById('power-upgrade-cost')!.textContent = pCost > 0 ? pCost.toLocaleString() : 'MAX';
@@ -364,6 +397,96 @@ function renderRetrofits(containerId: string, kind: 'factory' | 'power'): void {
   }
 }
 
+// ==================== 场景化面板头（结构一次性构建，1Hz 只改内联样式/class） ====================
+
+type FactorySys = ReturnType<typeof getSystems>['factorySys'];
+
+let lastFloorCount = -1;
+let lastWipSig = '';
+let lastQueueSig = '';
+
+/** 像素车间：楼层=工厂等级（升级时新楼层落入）、在造车辆自下而上成型、队列等候 */
+function updateFactoryScene(s: GameState, _fs: FactorySys): void {
+  const floors = document.getElementById('scene-floors');
+  if (floors && s.factory.level !== lastFloorCount) {
+    const dropping = lastFloorCount >= 0 && s.factory.level > lastFloorCount;
+    lastFloorCount = s.factory.level;
+    floors.innerHTML = Array.from({ length: s.factory.level }, (_, i) =>
+      `<div class="floor${dropping && i === s.factory.level - 1 ? ' drop' : ''}"></div>`).join('');
+  }
+
+  const job = s.garage.buildQueue[0];
+  const build = document.getElementById('scene-build');
+  const wip = document.getElementById('scene-wip');
+  const pctEl = document.getElementById('scene-wip-pct');
+  if (build && wip && pctEl) {
+    if (job && job.finishAt > 0) {
+      const sig = String(job.tier);
+      if (sig !== lastWipSig) {
+        lastWipSig = sig;
+        wip.textContent = getVehicleConfig(job.tier)?.emoji ?? '🚗';
+      }
+      const progress = Math.min(1, Math.max(0, 1 - (job.finishAt - Date.now()) / (job.totalTime * 1000)));
+      wip.style.clipPath = `inset(${Math.round((1 - progress) * 100)}% 0 0 0)`;
+      pctEl.textContent = `${Math.round(progress * 100)}%`;
+      build.classList.remove('idle');
+    } else if (lastWipSig !== '' || !build.classList.contains('idle')) {
+      lastWipSig = '';
+      wip.style.clipPath = '';
+      pctEl.textContent = '';
+      build.classList.add('idle');
+    }
+  }
+
+  const queue = document.getElementById('scene-queue');
+  if (queue) {
+    const q = s.garage.buildQueue.slice(1);
+    const qsig = q.map(j => j.tier).join(',');
+    if (qsig !== lastQueueSig) {
+      lastQueueSig = qsig;
+      queue.innerHTML = q.length > 0
+        ? '<span class="q-label">队列</span>' +
+          q.map(j => `<span class="q-car">${getVehicleConfig(j.tier)?.emoji ?? '🚗'}</span>`).join('')
+        : '';
+    }
+  }
+}
+
+/** 电站储罐：液位=储能%，超负荷罐体震动 */
+function updatePowerScene(s: GameState, cap: number): void {
+  const liquid = document.getElementById('tank-liquid');
+  if (liquid) liquid.style.height = `${Math.min(100, (s.resources.energy / cap) * 100)}%`;
+  const ocActive = s.factory.overclockUntil > Date.now();
+  document.getElementById('scene-tank')?.classList.toggle('overclock', ocActive);
+  const info = document.getElementById('tank-info');
+  if (info) {
+    info.textContent = ocActive
+      ? `⚡ 超负荷 ×${GAME_CONSTANTS.FACTORY_OVERCLOCK_MULT} 运转中`
+      : `储备 ${Math.floor(s.resources.energy)} / ${cap}⚡`;
+  }
+}
+
+/** 实验室烧瓶：液位=研究进度（颜色区分主线/支线/子科技），空闲灰暗 */
+function updateTechScene(s: GameState): void {
+  const flask = document.getElementById('scene-flask');
+  const liquid = document.getElementById('flask-liquid');
+  const info = document.getElementById('flask-info');
+  if (!flask || !liquid || !info) return;
+  const r = s.techTree.researching;
+  if (r) {
+    const label = r.kind === 'main' ? `主线 L${r.level}` : r.kind === 'side' ? '辅助科技' : '子科技';
+    const progress = Math.min(1, Math.max(0, 1 - (r.finishAt - Date.now()) / (r.totalTime * 1000)));
+    liquid.style.height = `${Math.round(progress * 82)}%`;
+    liquid.style.background = r.kind === 'main' ? 'var(--blue)' : r.kind === 'side' ? 'var(--teal)' : 'var(--gold-deep)';
+    info.textContent = `${label} 研究中 · ${Math.round(progress * 100)}%`;
+    flask.classList.add('active');
+  } else {
+    liquid.style.height = '0%';
+    info.textContent = '研究槽空闲';
+    flask.classList.remove('active');
+  }
+}
+
 // ==================== 科技树（从 TechConfig 读取，不再硬编码） ====================
 
 const TECH_EMOJIS = ['', '🔧', '🔥', '⚡', '🌍', '🚀'];
@@ -379,6 +502,7 @@ export function renderTech(): void {
   const researchRemain = researching
     ? Math.max(0, Math.ceil((researching.finishAt - Date.now()) / 1000))
     : 0;
+  updateTechScene(s);
 
   // 当前科技等级总览：Lv.x/5 + 等级名 + 圆点
   const summaryEl = document.getElementById('tech-summary');

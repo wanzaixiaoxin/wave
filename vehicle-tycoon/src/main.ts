@@ -12,6 +12,7 @@ import { GAME_CONSTANTS, buildEnergyCost } from './config/GameConstants';
 import { getEnRouteEventConfig } from './config/EnRouteEventConfig';
 import { getBuildQueueMax } from './systems/FactorySystem';
 import { getUpgradeMult } from './systems/UpgradeSystem';
+import { getEffectivePartsCost } from './systems/TechSystem';
 
 import { setGameLoop, setRenderFn, requestRender, getState, getSystems } from './ui/context';
 import { getTraitName } from './ui/format';
@@ -24,6 +25,9 @@ import { startTutorial, bindTutorial, resetTutorial } from './ui/tutorial';
 import { renderGarage } from './ui/garage';
 import { renderOrders } from './ui/orders';
 import { renderHint } from './ui/hint';
+import { renderCity } from './ui/city';
+import { initMap, renderMap } from './ui/map';
+import { initTabs, showTab } from './ui/tabs';
 import {
   renderTopBar, updateStatusIcons, buildTierOptions, renderWorkbench,
   renderFactory, renderTech, renderAchievements, getBuildTierSelection,
@@ -32,7 +36,6 @@ import {
 // ==================== 状态 ====================
 
 let gameLoop: GameLoop;
-let currentTab = 'garage';
 
 // ==================== 启动 ====================
 
@@ -68,6 +71,8 @@ function init(): void {
 
   bindEvents();
   bindUI();
+  initTabs(); // 「返回园区」浮钮
+  initMap(); // 园区建筑点击（依赖 tabs.ts 导航）
 
   // 离线结算（放在 bindEvents 之后，OFFLINE_EARNINGS 弹窗才能收到事件）
   if (offlineSeconds > 10) {
@@ -87,8 +92,10 @@ function init(): void {
 function renderAll(): void {
   renderTopBar();
   renderHint();
+  renderMap();
   renderGarage();
   renderOrders();
+  renderCity();
   renderFactory();
   renderTech();
   renderAchievements();
@@ -108,6 +115,7 @@ function bindEvents(): void {
     GameEvent.POWER_UPGRADED, GameEvent.TECH_RESEARCHED, GameEvent.RANDOM_EVENT_TRIGGERED,
     GameEvent.OFFLINE_EARNINGS, GameEvent.QUALITY_UPGRADED,
     GameEvent.EN_ROUTE_EVENT_TRIGGERED, GameEvent.EN_ROUTE_EVENT_RESOLVED,
+    GameEvent.CITY_PROSPERITY_UP, GameEvent.CITY_PROJECT_COMPLETED,
   ];
 
   events.forEach(e => EventBus.on(e, (...args: unknown[]) => {
@@ -119,7 +127,14 @@ function bindEvents(): void {
         const isCrit = (args[3] as boolean) ?? false;
         const critMult = (args[4] as number) ?? 1;
         const name = v ? v.name : '车辆';
-        showFloatingGold(reward, isCrit);
+        // 收益在赚钱车辆的卡片上跳金币；卡片不在屏（切了面板）时回退屏幕中央
+        const cardEl = v ? document.querySelector<HTMLElement>(`.vehicle-card[data-vid="${v.id}"]`) : null;
+        if (cardEl) {
+          const r = cardEl.getBoundingClientRect();
+          showFloatingGold(reward, isCrit, r.left + r.width / 2, r.top + r.height / 2);
+        } else {
+          showFloatingGold(reward, isCrit);
+        }
         if (isCrit) showCritEffect(critMult);
         goldBounce();
         showToast(`✅ ${name} 完成订单`, `+${reward}🪙${isCrit ? ' 💥暴击' : ''}`);
@@ -133,6 +148,30 @@ function bindEvents(): void {
         addLog(`🚗 新车出厂！${cfg?.emoji} ${v.name} [${getTraitName(v.trait)}]`);
         showToast(`🚗 新车出厂！`, `${cfg?.emoji} ${v.name} · ${getTraitName(v.trait)}`);
         setTimeout(() => addLog('💡 等几秒订单刷新后，点击「派车」让它去赚钱'), 2000);
+        // 出厂动画：新车从工厂沿道路滑向停车场
+        const road = document.getElementById('map-road');
+        if (road && cfg) {
+          const car = document.createElement('span');
+          car.className = 'map-car-deliver';
+          car.textContent = cfg.emoji;
+          car.style.left = '12%';
+          road.appendChild(car);
+          requestAnimationFrame(() => { car.style.left = '88%'; car.style.opacity = '0'; });
+          setTimeout(() => car.remove(), 1600);
+        }
+        break;
+      }
+      case GameEvent.CITY_PROSPERITY_UP: {
+        const level = args[0] as number;
+        const reward = args[1] as { gold: number; parts: number } | null;
+        const rewardText = reward ? `，城市大礼包 +${reward.gold.toLocaleString()}🪙 +${reward.parts.toLocaleString()}⚙️` : '';
+        showToast(`🌆 城市繁荣 Lv.${level}`, `运输畅通获得城市认可，全局收入 +5%${rewardText}`);
+        addLog(`🌆 城市繁荣升至 Lv.${level}（收入 +${level * 5}%）${rewardText}`);
+        break;
+      }
+      case GameEvent.CITY_PROJECT_COMPLETED: {
+        const proj = args[0] as { name: string; emoji: string };
+        addLog(`🏗️ 城市基建「${proj.emoji}${proj.name}」已建成投产`);
         break;
       }
       case GameEvent.RANDOM_EVENT_TRIGGERED: {
@@ -171,7 +210,7 @@ function bindEvents(): void {
         break;
       }
       case GameEvent.GARAGE_EXPANDED: {
-        addLog(`🏠 车库扩建完成！容量 +2`);
+        addLog(`🏠 车库扩建完成！容量 +${GAME_CONSTANTS.GARAGE_EXPAND_SPACES}`);
         break;
       }
       case GameEvent.FACTORY_UPGRADED: {
@@ -236,8 +275,9 @@ function bindUI(): void {
       addLog(`❌ 金币不足！需要 ${Math.floor(cfg.buildCost * getUpgradeMult(s, 'build_cost'))}🪙，当前 ${s.resources.gold}🪙`);
       return;
     }
-    if (s.resources.parts < cfg.partsCost) {
-      addLog(`❌ 零件不足！需要 ${cfg.partsCost}⚙️`);
+    const partsNeed = getEffectivePartsCost(s, cfg.partsCost); // 与 createVehicle 同口径：精益制造折后价
+    if (s.resources.parts < partsNeed) {
+      addLog(`❌ 零件不足！需要 ${partsNeed}⚙️`);
       return;
     }
     // M8：动力（能源）校验，与 createVehicle 保持同一来源
@@ -260,13 +300,16 @@ function bindUI(): void {
   document.getElementById('btn-expand')!.onclick = () => {
     const ec = getSystems().economySys;
     if (ec.expandGarage()) {
-      addLog('🏠 车库扩建完成！+2 车位');
+      addLog(`🏠 车库扩建完成！+${GAME_CONSTANTS.GARAGE_EXPAND_SPACES} 格`);
+      showToast('🏠 车库扩建完成', `容量 +${GAME_CONSTANTS.GARAGE_EXPAND_SPACES} 格，现有 ${getState().garage.maxCapacity} 格`);
     } else {
       const state = getState();
       if (state.garage.maxCapacity >= GAME_CONSTANTS.GARAGE_MAX_CAPACITY) {
         addLog(`🏠 车库已到最大容量（${GAME_CONSTANTS.GARAGE_MAX_CAPACITY} 格）`);
+        showToast('🏠 车库已满', `已达最大容量 ${GAME_CONSTANTS.GARAGE_MAX_CAPACITY} 格`);
       } else {
         addLog(`❌ 金币不足，扩建需要 ${ec.getNextExpandCost()}🪙`);
+        showToast('❌ 扩建失败', `金币不足，需要 ${ec.getNextExpandCost().toLocaleString()}🪙`);
       }
     }
     requestRender();
@@ -315,25 +358,8 @@ function bindUI(): void {
     requestRender();
   };
 
-  // 底部导航：切 Tab = 面板占据主区域；「车库」Tab 恢复主页面（车库+订单同屏）
-  const showTab = (tab: string): void => {
-    currentTab = tab;
-    document.querySelectorAll('#bottombar button').forEach(b =>
-      b.classList.toggle('active', b.getAttribute('data-tab') === tab));
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('visible'));
-    const home = document.getElementById('main-home');
-    const panel = document.getElementById('panel-' + tab);
-    const isPanel = !!panel;
-    if (home) home.classList.toggle('hidden', isPanel);
-    if (panel) panel.classList.add('visible');
-    requestRender();
-  };
-
-  document.querySelectorAll('#bottombar button').forEach(btn => {
-    btn.addEventListener('click', () => showTab(btn.getAttribute('data-tab')!));
-  });
-
-  // 顶栏车辆状态图标点击切回车库
+  // 页签导航（tabs.ts）：切 Tab = 面板占据主区域；'garage' 恢复园区主页
+  // 顶栏车辆状态图标点击切回园区主页
   document.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
     if (target.closest('#vehicle-status-icons')) showTab('garage');

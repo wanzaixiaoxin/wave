@@ -1,5 +1,5 @@
 // ============================================================
-// 游戏日志 — 底部滚动消息区（保留最近 50 条，展示 20 条）
+// 游戏日志 — 底部消息条（保留最近 50 条，只展示最新 1 条，单行省略收尾）
 // ============================================================
 
 const logMessages: string[] = [];
@@ -7,7 +7,7 @@ const logMessages: string[] = [];
 export function addLog(msg: string): void {
   logMessages.unshift(msg);
   if (logMessages.length > 50) logMessages.pop();
-  // 只渲染最近 3 条：容器自适应高度，无内部滚动条
+  // 只渲染最新 1 条：单行滚动条式提示，无内部滚动条
   const container = document.getElementById('log')!;
-  container.innerHTML = logMessages.slice(0, 3).map(m => `<div>${m}</div>`).join('');
+  container.innerHTML = `<div>${logMessages[0]}</div>`;
 }
