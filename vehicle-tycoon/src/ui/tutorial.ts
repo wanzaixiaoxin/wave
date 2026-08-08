@@ -26,7 +26,7 @@ interface TutorialStep {
 const TUTORIAL_STEPS: TutorialStep[] = [
   {
     title: '🚗 造你的第一辆车',
-    desc: '点击上方高亮的「🔧 制造」按钮，造一辆独轮车！\n\n💡 独轮车只要 10🪙，你正好有 200🪙',
+    desc: '点击上方高亮的「🔨 开工」按钮，造一辆独轮车！\n\n💡 独轮车只要 10🪙，你正好有 200🪙',
     target: '#btn-build',
     advanceOn: GameEvent.VEHICLE_PRODUCED,
     manual: false,

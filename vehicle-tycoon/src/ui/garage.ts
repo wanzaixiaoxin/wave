@@ -4,7 +4,8 @@
 
 import { Vehicle, Quality, TraitType, VehicleStats, Specialization, BuildJob } from '../core/types';
 import { getVehicleConfig, getUnmetRequirements, VEHICLE_CONFIGS, getParkingSpaces, getOccupiedSpaces } from '../config/VehicleConfig';
-import { GAME_CONSTANTS, statUpgradeCost, getBreakinBonus, getMileageLifespan } from '../config/GameConstants';
+import { GAME_CONSTANTS, statUpgradeCost, getBreakinBonus, getMileageLifespan,
+  cargoIncomeMult, speedDurationMult, durabilityWearReduction } from '../config/GameConstants';
 import { getState, getSystems, requestRender } from './context';
 import { getTraitName, getTraitDesc, getQualityLabel } from './format';
 import { getUpgradeMult } from '../systems/UpgradeSystem';
@@ -198,7 +199,6 @@ export function showVehicleDetail(v: Vehicle): void {
   const lowResidual = paidCost > 0 && residual < paidCost * 0.2;
   const wearHigh = v.wear >= GAME_CONSTANTS.WEAR_PENALTY_THRESHOLD;
   const traitDesc = getTraitDesc(v.trait);
-  const statPips = (n: number): string => '●'.repeat(n) + '○'.repeat(GAME_CONSTANTS.STAT_MAX_LEVEL - n);
   const spec = v.specialization ? SPEC_INFO[v.specialization] : undefined;
 
   const statusText = v.status === 'idle'
@@ -208,15 +208,42 @@ export function showVehicleDetail(v: Vehicle): void {
       : '🚚 派单中';
   const statusCls = v.status === 'idle' ? 'idle' : v.status === 'maintenance' ? 'maintenance' : 'busy';
 
-  // ---------- 结构：标题行 + 资产档案 / 性能参数 / 运营状态 三分区 ----------
+  // ---------- 结构：车辆展台 + 属性强化/规格晋升/运营配置（参考无尽冬日养成：行内升级） ----------
   const overlay = document.getElementById('modal-overlay')!;
   const content = document.getElementById('modal-content')!;
   content.classList.add('modal-vd');
+
+  // 规格 → 星级（WOS 稀有度语言：⚪★ / 🔵★★ / 🟡★★★）
+  const qualityStars = (q: Quality): string => {
+    const n = q === Quality.Gold ? 3 : q === Quality.Blue ? 2 : 1;
+    return '★'.repeat(n) + `<span class="off">${'★'.repeat(3 - n)}</span>`;
+  };
+
   content.innerHTML = `
-    <h2>${config?.emoji ?? '🚗'} ${v.name}</h2>
-    <div class="vd-sub">
-      T${v.tier} ${config?.name ?? ''} · 占${getParkingSpaces(v.tier)}格 · ${getQualityLabel(v.quality)}
-      <span class="status-badge ${statusCls}">${statusText}</span>
+    <div class="vd-stage">
+      <div class="vd-vehicle">${config?.emoji ?? '🚗'}</div>
+      <div class="vd-lift"></div>
+      <div class="vd-nameplate">
+        <div class="vd-name">${v.name}</div>
+        <div class="vd-meta">T${v.tier} ${config?.name ?? ''} · ${getQualityLabel(v.quality)} · 占${getParkingSpaces(v.tier)}格 · <span class="status-badge ${statusCls}">${statusText}</span></div>
+        <div class="vd-stars">${qualityStars(v.quality)}</div>
+        <div class="vd-chips">
+          <span class="chip${v.trait === TraitType.Lucky ? ' lucky' : ''}" title="${traitDesc ?? ''}">🧬 ${getTraitName(v.trait)}${v.trait === TraitType.Lucky ? ' 🔥' : ''}</span>
+          ${spec ? `<span class="chip spec">${spec.icon} ${spec.name}</span>` : ''}
+        </div>
+      </div>
+    </div>
+    <div class="vd-sec">
+      <div class="vd-sec-title">💪 属性强化</div>
+      <div id="vd-stat-rows"></div>
+    </div>
+    <div class="vd-sec">
+      <div class="vd-sec-title">⭐ 规格晋升</div>
+      <div id="vd-quality-box"></div>
+    </div>
+    <div class="vd-sec">
+      <div class="vd-sec-title">🎯 运营配置${spec ? '（已确立，永久生效）' : v.quality === Quality.White ? '（🔵 标准型解锁）' : '（三选一，永久）'}</div>
+      <div class="vd-spec-slots" id="vd-spec-slots"></div>
     </div>
     <div class="vd-sec">
       <div class="vd-sec-title">📁 资产档案</div>
@@ -224,24 +251,126 @@ export function showVehicleDetail(v: Vehicle): void {
       <div class="vd-bar"><div style="width:${mileagePct}%"></div></div>
       <div class="vd-row"><span>💰 当前残值${lowResidual ? ' ⬇高折旧' : ''}</span><b class="${lowResidual ? 'warn' : ''}">${residual.toLocaleString()}🪙 / 实付 ${paidCost.toLocaleString()}</b></div>
       <div class="vd-row"><span>⏱️ 车龄 · 磨合 · 翻新</span><b>${ageMin}分钟 · +${breakinPct}% · ${v.refurbishCount}/${GAME_CONSTANTS.REFURBISH_MAX_COUNT}次</b></div>
-    </div>
-    <div class="vd-sec">
-      <div class="vd-sec-title">⚙️ 性能参数</div>
-      <div class="vd-stats">
-        <div class="vd-stat">🏎️ 速度<span class="vd-pips">${statPips(v.stats.speed)}</span></div>
-        <div class="vd-stat">📦 载货<span class="vd-pips">${statPips(v.stats.cargo)}</span></div>
-        <div class="vd-stat">🔩 耐久<span class="vd-pips">${statPips(v.stats.durability)}</span></div>
-      </div>
-      <div class="vd-note">速度 耗时-3%~25%递进 · L3 疲劳减半 · L5 免速度电费｜载货 收入+3%~25%递进 · L3 贵重单+15% · L5 暴击+5%｜耐久 磨损-6%~40%递进 · L3 可接🏔️长途单 · L5 寿命+25%</div>
-      <div class="vd-row"><span>🧬 出厂参数</span><b>${getTraitName(v.trait)}${traitDesc ? `（${traitDesc}）` : ''}${v.trait === TraitType.Lucky ? ' 🔥稀有' : ''}</b></div>
-      ${spec ? `<div class="vd-row"><span>🎯 运营配置</span><b>${spec.icon}${spec.name}（${spec.desc}）</b></div>` : ''}
-    </div>
-    <div class="vd-sec">
-      <div class="vd-sec-title">📊 运营状态</div>
       <div class="vd-row"><span>🔧 磨损${wearHigh ? '（收入-30% 耗时+20%）' : ''}</span><b class="${wearHigh ? 'warn' : ''}">${Math.floor(v.wear)}/100</b></div>
       <div class="vd-row"><span>😮‍💨 连单 · 战绩</span><b>${v.consecutiveOrders}连单 · ${v.ordersCompleted}单 · ${v.totalEarnings.toLocaleString()}🪙</b></div>
     </div>
   `;
+
+  // ---------- 属性强化行：pips（L3/L5 断点高亮）+ 当前效果 → 下一级预览 + 行内升级按钮 ----------
+  const pipsOf = (lv: number): string =>
+    Array.from({ length: GAME_CONSTANTS.STAT_MAX_LEVEL }, (_, i) =>
+      `<span class="${i + 1 === 3 || i + 1 === 5 ? 'bp' : ''}">${i < lv ? '●' : '○'}</span>`).join('');
+  const statRows: Array<{
+    key: keyof VehicleStats; emoji: string; name: string;
+    effect: (lv: number) => string; marks: string;
+  }> = [
+    { key: 'speed', emoji: '🏎️', name: '速度',
+      effect: lv => `耗时 -${Math.round((1 - speedDurationMult(lv)) * 100)}%`,
+      marks: 'L3 疲劳减半 · L5 免速度电费' },
+    { key: 'cargo', emoji: '📦', name: '载货',
+      effect: lv => `收入 +${Math.round((cargoIncomeMult(lv) - 1) * 100)}%`,
+      marks: 'L3 贵重单+15% · L5 暴击+5%' },
+    { key: 'durability', emoji: '🔩', name: '耐久',
+      effect: lv => `磨损 -${Math.round(durabilityWearReduction(lv) * 100)}%`,
+      marks: 'L3 可接🏔️长途单 · L5 寿命+25%' },
+  ];
+  const rowsBox = content.querySelector('#vd-stat-rows')!;
+  for (const sd of statRows) {
+    const lv = v.stats[sd.key];
+    const maxed = lv >= GAME_CONSTANTS.STAT_MAX_LEVEL;
+    const row = document.createElement('div');
+    row.className = 'vd-stat-row';
+    row.innerHTML = `
+      <span class="sr-icon">${sd.emoji}</span>
+      <div class="sr-mid">
+        <div class="sr-name">${sd.name}<span class="sr-pips">${pipsOf(lv)}</span></div>
+        <div class="sr-effect">${sd.effect(lv)}${maxed ? '' : ` <span class="vd-next">→ ${sd.effect(lv + 1)}</span>`}</div>
+        <div class="sr-marks">${sd.marks}</div>
+      </div>
+    `;
+    const btn = document.createElement('button');
+    if (maxed) {
+      btn.className = 'up-btn max';
+      btn.innerHTML = 'MAX';
+    } else {
+      const cost = statUpgradeCost(lv);
+      const cant = s.resources.gold < cost;
+      btn.className = `up-btn${cant ? ' cant' : ''}`;
+      btn.innerHTML = `⬆ 升级<span class="cost">${cost.toLocaleString()}🪙</span>`;
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        if (sys.vehicleSys.upgradeStat(v.id, sd.key)) {
+          addLog(`${sd.emoji} ${v.name} ${sd.name}升到 ${lv + 1} 级（-${cost}🪙）`);
+        } else {
+          addLog(`❌ 金币不足，升级需要 ${cost}🪙`);
+        }
+        showVehicleDetail(v);
+        requestRender();
+      };
+    }
+    row.appendChild(btn);
+    rowsBox.appendChild(row);
+  }
+
+  // ---------- 规格晋升（WOS 升星面板：当前星级 → 下一星级 + 消耗；升级中显示进度条） ----------
+  const qBox = content.querySelector('#vd-quality-box')!;
+  if (v.qualityUpgrade) {
+    const q = v.qualityUpgrade;
+    const progress = Math.min(1, Math.max(0, 1 - (q.finishAt - Date.now()) / (q.totalTime * 1000)));
+    qBox.innerHTML = `
+      <div class="vd-quality-row"><span class="upgrading">⬆ 升级中… ${Math.round(progress * 100)}%（期间锁定不可派单）</span></div>
+      <div class="vd-bar" style="margin-top:4px;"><div style="width:${Math.round(progress * 100)}%;background:var(--purple);"></div></div>
+    `;
+  } else if (v.quality === Quality.Gold) {
+    qBox.innerHTML = `<div class="vd-quality-row">🟡 工业型 <span class="vd-stars">★★★</span> 已达最高规格</div>`;
+  } else {
+    const nextLabel = v.quality === Quality.White ? '🔵 标准型 ★★' : '🟡 工业型 ★★★';
+    const upgradeTime = v.quality === Quality.White
+      ? GAME_CONSTANTS.QUALITY_UPGRADE_TIME_BLUE : GAME_CONSTANTS.QUALITY_UPGRADE_TIME_GOLD;
+    const energyCost = v.quality === Quality.White
+      ? GAME_CONSTANTS.ENERGY_QUALITY_BLUE : GAME_CONSTANTS.ENERGY_QUALITY_GOLD;
+    qBox.innerHTML = `
+      <div class="vd-quality-row">${getQualityLabel(v.quality)} <span class="arrow">→</span> ${nextLabel}</div>
+    `;
+    const btn = document.createElement('button');
+    btn.className = 'up-btn';
+    btn.style.cssText = 'width:100%;margin-top:5px;flex-direction:row;justify-content:center;gap:6px;';
+    btn.innerHTML = `⬆ 升级规格<span class="cost">${upgradeTime}s · ${energyCost}⚡</span>`;
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      if (sys.vehicleSys.upgradeQuality(v.id)) {
+        showToast('⬆ 开始升级', `${v.name} 进场升级规格，${upgradeTime} 秒后完成（期间不可派单）`);
+        addLog(`⬆ ${v.name} 开始升级规格（${upgradeTime}s · -${energyCost}⚡），期间锁定不可派单`);
+        hideModal();
+      } else {
+        addLog(`❌ 规格升级条件不足（需要空闲 + 完成订单数/金币/零件/${energyCost}⚡能源）`);
+      }
+      requestRender();
+    };
+    qBox.appendChild(btn);
+  }
+
+  // ---------- 运营配置槽（技能槽三选一；已确立的置灰锁定） ----------
+  const slotsBox = content.querySelector('#vd-spec-slots')!;
+  const specPickable = !v.specialization && (v.quality === Quality.Blue || v.quality === Quality.Gold);
+  for (const [key, info] of Object.entries(SPEC_INFO)) {
+    const slot = document.createElement('button');
+    const selected = v.specialization === key;
+    slot.className = `spec-slot${selected ? ' selected' : specPickable ? '' : ' locked'}`;
+    slot.innerHTML = `<span class="ss-icon">${info.icon}</span><b>${info.name}</b><i>${info.desc}</i>`;
+    if (specPickable && !selected) {
+      slot.onclick = (e) => {
+        e.stopPropagation();
+        if (sys.vehicleSys.specialize(v.id, key as Specialization)) {
+          showToast(`${info.icon} 运营配置确立！`, `${v.name} 成为「${info.name}」— ${info.desc}`);
+          addLog(`🎯 ${v.name} 选择了${info.name}运营配置（${info.desc}）`);
+        }
+        showVehicleDetail(v);
+        requestRender();
+      };
+    }
+    slotsBox.appendChild(slot);
+  }
 
   // ---------- 操作按钮（按用途分组：运营操作 / 资产处置） ----------
   const ops: VdAction[] = [];
@@ -294,63 +423,6 @@ export function showVehicleDetail(v: Vehicle): void {
         requestRender();
       } });
     }
-  }
-
-  // 属性升级（速度/载货/耐久）
-  const statDefs: Array<{ key: keyof VehicleStats; emoji: string; name: string }> = [
-    { key: 'speed', emoji: '🏎️', name: '速度' },
-    { key: 'cargo', emoji: '📦', name: '载货' },
-    { key: 'durability', emoji: '🔩', name: '耐久' },
-  ];
-  for (const sd of statDefs) {
-    const cur = v.stats[sd.key];
-    if (cur >= GAME_CONSTANTS.STAT_MAX_LEVEL) {
-      continue; // 已满级的不显示按钮
-    }
-    const cost = statUpgradeCost(cur);
-    ops.push({ label: `${sd.emoji} ${sd.name}↑ (${cost}🪙)`, cb: () => {
-      if (sys.vehicleSys.upgradeStat(v.id, sd.key)) {
-        addLog(`${sd.emoji} ${v.name} ${sd.name}升到 ${cur + 1} 级（-${cost}🪙）`);
-      } else {
-        addLog(`❌ 金币不足，升级需要 ${cost}🪙`);
-      }
-      showVehicleDetail(v);
-      requestRender();
-    } });
-  }
-
-  // 运营配置选择（蓝规格解锁，三选一，永久）
-  if (!v.specialization && (v.quality === Quality.Blue || v.quality === Quality.Gold)) {
-    for (const [key, info] of Object.entries(SPEC_INFO)) {
-      ops.push({ label: `${info.icon} 配置·${info.name}`, cb: () => {
-        if (sys.vehicleSys.specialize(v.id, key as Specialization)) {
-          showToast(`${info.icon} 运营配置确立！`, `${v.name} 成为「${info.name}」— ${info.desc}`);
-          addLog(`🎯 ${v.name} 选择了${info.name}运营配置（${info.desc}）`);
-        }
-        showVehicleDetail(v);
-        requestRender();
-      } });
-    }
-  }
-
-  // 升级规格（M7：耗时化，升级中锁车不显示按钮；M8：耗电）
-  if (v.quality !== Quality.Gold && !v.qualityUpgrade) {
-    const upgradeTime = v.quality === Quality.White
-      ? GAME_CONSTANTS.QUALITY_UPGRADE_TIME_BLUE
-      : GAME_CONSTANTS.QUALITY_UPGRADE_TIME_GOLD;
-    const energyCost = v.quality === Quality.White
-      ? GAME_CONSTANTS.ENERGY_QUALITY_BLUE
-      : GAME_CONSTANTS.ENERGY_QUALITY_GOLD;
-    ops.push({ label: `⬆ 升级规格 (${upgradeTime}s · ${energyCost}⚡)`, cls: 'primary', cb: () => {
-      if (sys.vehicleSys.upgradeQuality(v.id)) {
-        showToast('⬆ 开始升级', `${v.name} 进场升级规格，${upgradeTime} 秒后完成（期间不可派单）`);
-        addLog(`⬆ ${v.name} 开始升级规格（${upgradeTime}s · -${energyCost}⚡），期间锁定不可派单`);
-        hideModal();
-      } else {
-        addLog(`❌ 规格升级条件不足（需要空闲 + 完成订单数/金币/零件/${energyCost}⚡能源）`);
-      }
-      requestRender();
-    } });
   }
 
   // 出售（S2a：残值金币，无零件；与拆解二选一）

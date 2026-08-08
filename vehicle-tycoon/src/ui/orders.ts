@@ -17,6 +17,13 @@ const TYPE_NAMES: Record<string, string> = {
   valuable: '💎 贵重物品',
 };
 
+// 托盘货物：订单类型 → 月台上的货堆形象
+const CARGO_EMOJIS: Record<string, string> = {
+  normal: '📦',
+  long_distance: '🧳',
+  valuable: '🎁',
+};
+
 const QUALITY_ICONS: Record<string, string> = {
   white: '⚪',
   blue: '🔵',
@@ -75,8 +82,8 @@ export function renderOrders(): void {
     const s = getState();
     const msg = s.garage.vehicles.length === 0
       ? '🚗 先造一辆车，订单会自动出现 ↗'
-      : '⏳ 等待新订单...';
-    container.innerHTML = `<div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:20px;font-size:13px;">${msg}</div>`;
+      : '等待新订单...';
+    container.innerHTML = `<div class="depot-empty"><span class="de-cargo">📭</span><span>${msg}</span></div>`;
     return;
   }
 
@@ -101,17 +108,23 @@ export function renderOrders(): void {
       vehicleInfo = '🔴 暂无空闲车辆';
     }
 
+    // 月台托盘：货堆（类型配 emoji）+ 赏金挂牌 + 车型限高牌；类型名/耗时/声望与赏金从纯文字行改为挂牌
+    const cargo = CARGO_EMOJIS[o.type] ?? '📦';
     div.innerHTML = `
       <div class="order-head">
         <span class="type">${TYPE_NAMES[o.type] || o.type}</span>
-        <span class="order-tier">T${o.tier}</span>
+        <div class="order-meta">
+          <span class="meta-chip">⏱ ${o.duration}s</span>
+          ${o.type === 'valuable'
+            ? `<span class="meta-chip rep">📈 -${GAME_CONSTANTS.REP_VALUABLE_COST}</span>`
+            : ''}
+        </div>
       </div>
-      <div class="reward">+${o.baseReward}🪙</div>
-      <div class="order-meta">
-        <span class="meta-chip">⏱ ${o.duration}s</span>
-        ${o.type === 'valuable'
-          ? `<span class="meta-chip rep">📈 -${GAME_CONSTANTS.REP_VALUABLE_COST} 声望</span>`
-          : ''}
+      <div class="order-pallet">
+        <span class="order-tier">T${o.tier}</span>
+        <span class="pallet-cargo">${cargo}</span>
+        <span class="pallet-base"></span>
+        <span class="pallet-tag">+${o.baseReward}🪙</span>
       </div>
       <div class="vehicle-hint">${vehicleInfo}</div>
     `;
@@ -169,6 +182,15 @@ export function renderOrders(): void {
       const target = nowIdle.find(v => v.id === targetId);
       if (target) {
         orderSys.assignVehicle(o.id, target.id);
+        // 装车动效：货堆从卡片飞出（触发式浮层，不进签名缓存；随后订单区重绘本卡消失）
+        const r = div.getBoundingClientRect();
+        const fly = document.createElement('div');
+        fly.className = 'cargo-fly';
+        fly.textContent = cargo;
+        fly.style.left = `${r.left + r.width / 2}px`;
+        fly.style.top = `${r.top + 30}px`;
+        document.body.appendChild(fly);
+        setTimeout(() => fly.remove(), 900);
         showToast(`🚚 ${target.name} 接了订单`, `${TYPE_NAMES[o.type] || ''} · ${o.duration}秒后完成`);
         addLog(`🚚 ${target.name} 接了${TYPE_NAMES[o.type] || ''}订单`);
         // 动力不足（M8）：能源没跟上，本次订单耗时 ×1.5

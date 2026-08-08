@@ -145,7 +145,8 @@ export function renderHint(): void {
   }
 
   bar.style.display = 'flex';
-  bar.innerHTML = `<span>💡</span><span class="hint-text">${hint.icon} ${hint.text}</span><span class="hint-arrow">→</span>`;
+  // 工头老陈的气泡提示：👷 角色 + 纸质气泡框，提示内容与点击行为不变
+  bar.innerHTML = `<span class="foreman">👷</span><span class="hint-bubble"><span class="hint-text">${hint.icon} ${hint.text}</span><span class="hint-arrow">→</span></span>`;
   bar.onclick = () => executeHint(hint);
 }
 

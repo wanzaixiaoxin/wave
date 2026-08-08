@@ -95,7 +95,8 @@
       .vehicle-card .card-line { font-size: 9.5px; line-height: 1.4; }
       #orders { gap: 10px; grid-auto-rows: 132px; }
       .order-card { padding: 8px 8px 6px; }
-      .order-card .reward { font-size: 16px; }
+      .pallet-tag { font-size: 13px; }
+      .pallet-cargo { font-size: 24px; }
       .order-card .type { font-size: 10.5px; }
       .meta-chip { font-size: 9.5px; padding: 1px 7px; }
       .order-card .pill { height: 22px; min-width: 25px; font-size: 12px; }
@@ -158,9 +159,11 @@
     .status-icon { font-size: 12px; cursor: pointer; opacity: 0.85; }
     .status-icon:hover { opacity: 1; }
 
-    /* ===== 造车工作台 ===== */
+    /* ===== 造车工作台（总装车间条：图纸架 + 成本吊牌 + 迷你传送带） ===== */
     .workbench {
-      background: var(--bg-2);
+      background:
+        repeating-linear-gradient(90deg, transparent 0 14px, rgba(51,48,42,0.05) 14px 15px),
+        var(--bg-2); /* 车间地面像素格 */
       border-radius: var(--r-l); border: 3px solid var(--line);
       padding: 6px 10px;
       display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
@@ -196,15 +199,41 @@
       padding: 0 3px; pointer-events: none;
     }
     .modal .pill-row { margin: 10px 0 2px; }
-    /* 选中车型信息行（造车工作台）：成本/占格/耗时，资源不足标红 */
+    /* 选中车型信息行（总装车间条）：大工件 + 成本吊牌（哪样资源不够哪块牌子红） */
     .build-info {
       width: 100%; margin-top: 3px;
+      display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
       font-size: 11.5px; font-weight: 700; color: var(--text-2);
       font-variant-numeric: tabular-nums;
     }
     .build-info .poor { color: var(--red); }
+    .wb-piece { font-size: 20px; line-height: 1; filter: drop-shadow(2px 2px 0 rgba(51,48,42,0.2)); }
+    .wb-piece-name { font-size: 12px; font-weight: 900; color: var(--text-1); margin-right: 2px; }
+    .cost-tag {
+      padding: 1px 7px; font-size: 10px; font-weight: 800; color: var(--text-1);
+      background: var(--bg-0); border: 1.5px solid var(--line); border-radius: 2px;
+      box-shadow: 2px 2px 0 rgba(51,48,42,0.12);
+    }
+    .cost-tag.poor { color: var(--red); border-color: var(--red); background: #f9e6e3; }
+    /* 图纸架：工作台车型胶囊换皮蓝图（网格纸 + 选中蓝图钉） */
+    #build-tier-select .pill {
+      background:
+        repeating-linear-gradient(0deg, transparent 0 6px, rgba(91,127,184,0.16) 6px 7px),
+        repeating-linear-gradient(90deg, transparent 0 6px, rgba(91,127,184,0.16) 6px 7px),
+        #e8eef5;
+    }
+    #build-tier-select .pill.selected {
+      background:
+        repeating-linear-gradient(0deg, transparent 0 6px, rgba(91,127,184,0.2) 6px 7px),
+        repeating-linear-gradient(90deg, transparent 0 6px, rgba(91,127,184,0.2) 6px 7px),
+        #d7e5f2;
+      border-color: var(--blue);
+      box-shadow: 3px 3px 0 rgba(91,127,184,0.45);
+    }
+    /* 大开工按钮：工业主按钮 */
+    #btn-build { font-size: 15px; padding: 8px 22px; }
     /* 制造禁用原因常驻行（车位不足/未解锁/能源不足/队列满）：槽位常驻，不顶动下方车库/订单 */
-    .build-info.blocker { color: var(--red); margin-top: 2px; min-height: 15px; }
+    .build-info.blocker { color: var(--red); margin-top: 2px; min-height: 15px; display: block; }
 
     /* 贴纸按钮：墨线 + 实心错位投影，按压时位移吞影 */
     .btn {
@@ -224,26 +253,27 @@
     .btn-secondary { background: var(--bg-0); color: var(--text-1); }
     .btn-gold { background: var(--gold); color: var(--gold-ink); }
 
-    /* 建造进度（M7）：贴纸风进度条 + 排队胶囊（紧凑单行）；槽位常驻固定高度，建造开始/结束不顶动版面 */
+    /* 建造进度：迷你传送带（结构常驻，JS 签名缓存只改 emoji/clipPath/文字） */
     #build-status { margin-top: 4px; min-height: 36px; }
-    .build-active {
-      display: flex; justify-content: space-between; align-items: center; gap: 8px;
-      font-size: 10px; font-weight: 700; color: var(--text-1); margin-bottom: 2px;
+    .wb-belt {
+      position: relative; display: flex; align-items: center; gap: 8px;
+      height: 34px; padding: 0 8px; overflow: hidden;
+      border: 2px solid var(--line); border-radius: 2px; background: #5a5a64;
     }
-    .build-queue { color: var(--text-3); font-weight: 600; display: flex; gap: 4px; flex-wrap: wrap; }
-    .build-queue-item {
-      padding: 0 7px; border-radius: 2px;
-      background: var(--bg-3); border: 1.5px solid var(--line-soft);
-      font-size: 9.5px; font-weight: 700; color: var(--text-2);
+    .wb-belt::before { /* 传送带条纹滚动（复用车间 beltRoll） */
+      content: ''; position: absolute; left: 0; right: 0; bottom: 2px; height: 6px;
+      background: repeating-linear-gradient(90deg, #8f8f9a 0 8px, #4a4a52 8px 16px);
+      animation: beltRoll 0.8s steps(4) infinite;
     }
-    .build-progress {
-      height: 6px; border-radius: 2px; overflow: hidden;
-      background: var(--bg-3); border: 1.5px solid var(--line);
+    .wb-wip {
+      font-size: 20px; line-height: 1; position: relative; z-index: 1;
+      transition: clip-path 0.9s linear;
     }
-    .build-progress-bar {
-      height: 100%; background: var(--teal);
-      transition: width 0.3s linear;
-    }
+    .wb-wip.idle { opacity: 0.35; filter: grayscale(1); }
+    .wb-wip-info { font-size: 10px; font-weight: 800; color: #ffe08a; position: relative; z-index: 1; }
+    .wb-queue { margin-left: auto; display: flex; gap: 3px; align-items: center; position: relative; z-index: 1; }
+    .wb-queue .q-car { font-size: 14px; opacity: 0.8; }
+    .wb-queue .q-label { font-size: 8px; color: #d8d2c2; font-weight: 800; }
 
     /* ===== 区域标题 ===== */
     .section-title {
@@ -459,6 +489,105 @@
     .vd-actions.vd-close { margin-top: 8px; }
     .vd-actions.vd-close button { background: var(--bg-3); color: var(--text-2); box-shadow: none; }
 
+    /* ===== 养成界面（参考无尽冬日英雄养成：展台 + 属性行内升级 + 星级晋升 + 技能槽配置，像素都市风） ===== */
+    /* 车辆展台：像素车间升降台 */
+    .vd-stage {
+      position: relative; margin: -8px -6px 0; padding: 10px 10px 0;
+      border: 3px solid var(--line); border-radius: 2px; overflow: hidden;
+      background:
+        repeating-linear-gradient(90deg, transparent 0 14px, rgba(51,48,42,0.05) 14px 15px),
+        linear-gradient(180deg, #b8cfe0 0 62%, #8aa865 62%); /* 天空硬切地面 */
+      text-align: center;
+    }
+    .vd-stage .vd-vehicle {
+      font-size: 52px; line-height: 1.1; position: relative; z-index: 1;
+      filter: drop-shadow(3px 3px 0 rgba(51,48,42,0.25));
+      animation: vdIdle 2s steps(2) infinite;
+    }
+    @keyframes vdIdle { 50% { transform: translateY(-2px); } }
+    /* 升降台 */
+    .vd-lift {
+      width: 130px; height: 10px; margin: 0 auto; position: relative; z-index: 1;
+      background: repeating-linear-gradient(90deg, #8f8f9a 0 8px, #4a4a52 8px 16px);
+      border: 2px solid var(--line);
+    }
+    .vd-lift::before, .vd-lift::after {
+      content: ''; position: absolute; bottom: -8px; width: 8px; height: 8px;
+      background: #4a4a52; border: 2px solid var(--line);
+    }
+    .vd-lift::before { left: 10px; }
+    .vd-lift::after { right: 10px; }
+    /* 名牌：沥青牌 + 星级（规格稀有度，WOS 星级语言） */
+    .vd-nameplate {
+      margin: 14px -10px 0; padding: 6px 10px 8px;
+      background: #4a4a52; border-top: 3px solid var(--line);
+      color: #fff8e7;
+    }
+    .vd-nameplate .vd-name { font-size: 15px; font-weight: 900; letter-spacing: 1px; }
+    .vd-nameplate .vd-meta { font-size: 10px; font-weight: 700; color: #d8d2c2; margin-top: 1px; }
+    .vd-stars { font-size: 13px; letter-spacing: 3px; color: #ffe08a; margin-top: 2px; text-shadow: 1px 1px 0 var(--line); }
+    .vd-stars .off { color: rgba(255,253,246,0.3); text-shadow: none; }
+    .vd-chips { display: flex; gap: 4px; justify-content: center; margin-top: 4px; flex-wrap: wrap; }
+    .vd-chips .chip {
+      font-size: 9.5px; font-weight: 800; padding: 1px 7px;
+      background: var(--bg-0); color: var(--text-1); border: 1.5px solid var(--line);
+    }
+    .vd-chips .chip.lucky { background: #f9e6e3; color: var(--red); border-color: var(--red); }
+    .vd-chips .chip.spec { background: #e2f0ee; color: var(--teal); border-color: var(--teal); }
+    /* 属性强化：图标 + pips/效果/断点 + 行内升级按钮（WOS 签名行） */
+    .vd-stat-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 8px; margin-top: 5px;
+      background: var(--bg-0); border: 2px solid var(--line); border-radius: 2px;
+      box-shadow: 2px 2px 0 rgba(51,48,42,0.12);
+    }
+    .vd-stat-row .sr-icon { font-size: 20px; }
+    .vd-stat-row .sr-mid { flex: 1; min-width: 0; text-align: left; }
+    .vd-stat-row .sr-name { font-size: 11.5px; font-weight: 900; color: var(--text-1); }
+    .vd-stat-row .sr-pips { font-size: 9px; letter-spacing: 1.5px; color: var(--gold-strong); margin-left: 3px; }
+    .vd-stat-row .sr-pips .bp { color: var(--teal); } /* L3/L5 断点位 */
+    .vd-stat-row .sr-effect { font-size: 10px; font-weight: 700; color: var(--text-2); }
+    .vd-stat-row .sr-effect .vd-next { color: var(--green); font-weight: 900; }
+    .vd-stat-row .sr-marks { font-size: 8.5px; font-weight: 600; color: var(--text-3); }
+    .up-btn {
+      flex: none; display: flex; flex-direction: column; align-items: center;
+      padding: 5px 10px; min-width: 62px;
+      border: 2px solid var(--line); border-radius: 2px;
+      background: var(--gold); color: var(--gold-ink);
+      font-size: 11px; font-weight: 900; cursor: pointer;
+      box-shadow: 2px 2px 0 rgba(51,48,42,0.9);
+      transition: transform 0.12s, box-shadow 0.12s;
+    }
+    .up-btn:hover { transform: translate(-1px,-1px); box-shadow: 3px 3px 0 rgba(51,48,42,0.9); }
+    .up-btn:active { transform: translate(1px,1px); box-shadow: 1px 1px 0 rgba(51,48,42,0.9); }
+    .up-btn .cost { font-size: 9px; font-weight: 800; }
+    .up-btn.cant { background: var(--bg-3); color: var(--text-3); }
+    .up-btn.cant .cost { color: var(--red); }
+    .up-btn.max { background: #e2f0ee; color: var(--teal); border-color: var(--teal); cursor: default; box-shadow: none; }
+    /* 规格晋升（WOS 升星面板） */
+    .vd-quality-row {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 6px; font-size: 11.5px; font-weight: 900; color: var(--text-1);
+      background: var(--bg-0); border: 2px solid var(--line); border-radius: 2px; margin-top: 5px;
+    }
+    .vd-quality-row .arrow { color: var(--gold-strong); }
+    .vd-quality-row .upgrading { color: var(--purple); }
+    /* 运营配置：技能槽三选一 */
+    .vd-spec-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 5px; }
+    .spec-slot {
+      display: flex; flex-direction: column; align-items: center; gap: 1px;
+      padding: 7px 4px; cursor: pointer;
+      background: var(--bg-0); border: 2px solid var(--line); border-radius: 2px;
+      box-shadow: 2px 2px 0 rgba(51,48,42,0.12); font-family: inherit;
+      transition: transform 0.12s, box-shadow 0.12s;
+    }
+    .spec-slot:hover { transform: translate(-1px,-1px); box-shadow: 3px 3px 0 rgba(51,48,42,0.18); }
+    .spec-slot .ss-icon { font-size: 18px; }
+    .spec-slot b { font-size: 10.5px; color: var(--text-1); }
+    .spec-slot i { font-size: 8px; font-style: normal; color: var(--text-3); font-weight: 700; text-align: center; }
+    .spec-slot.selected { background: #e2f0ee; border-color: var(--teal); box-shadow: 3px 3px 0 rgba(55,145,139,0.35); cursor: default; }
+    .spec-slot.locked { opacity: 0.45; cursor: not-allowed; }
+
     /* ===== 订单区（左右结构右侧）：固定窄列竖排 3 张卡，卡高恒定，区域不伸缩 ===== */
     #orders-wrap {
       display: flex; flex-direction: column; min-height: 0;
@@ -479,8 +608,33 @@
       transition: transform 0.15s, box-shadow 0.15s;
     }
     .order-card:hover { transform: translate(-1px,-1px); box-shadow: var(--shadow-2); }
-    .order-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1px; }
+    .order-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1px; gap: 4px; }
     .order-head .type { font-size: 10px; color: var(--text-2); font-weight: 700; letter-spacing: 0.5px; }
+    .order-head .order-meta { margin: 0; min-height: 0; } /* 耗时/声望 chips 收进标题行右侧，省一行高度给托盘 */
+    /* 月台托盘：货堆（类型配 emoji）怠速浮动 + 木质托盘 + 赏金挂牌 + 车型限高牌 */
+    .order-pallet {
+      position: relative; display: flex; align-items: flex-end; justify-content: center;
+      height: 34px; margin: 2px 0 1px;
+    }
+    .pallet-cargo {
+      font-size: 21px; line-height: 1; z-index: 1;
+      filter: drop-shadow(2px 2px 0 rgba(51,48,42,0.18));
+      animation: cargoIdle 2s steps(2) infinite;
+    }
+    @keyframes cargoIdle { 50% { transform: translateY(-1.5px); } }
+    .pallet-base {
+      position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+      width: 58px; height: 6px; border: 1.5px solid var(--line);
+      background: repeating-linear-gradient(90deg, #a0814f 0 8px, #7d6438 8px 11px);
+    }
+    .pallet-tag {
+      position: absolute; right: 0; top: 0; padding: 0 5px;
+      background: var(--bg-0); border: 1.5px solid var(--line); border-radius: 2px;
+      font-size: 12px; font-weight: 900; color: var(--gold-strong);
+      box-shadow: 2px 2px 0 rgba(51,48,42,0.12);
+      font-variant-numeric: tabular-nums;
+    }
+    .order-pallet .order-tier { position: absolute; left: 0; top: 0; }
     .order-tier {
       padding: 0 6px; border-radius: 2px;
       background: var(--bg-3); border: 1.5px solid var(--line-soft);
@@ -497,11 +651,20 @@
       font-variant-numeric: tabular-nums;
     }
     .meta-chip.rep { background: #e2f0ee; color: var(--teal); border-color: var(--teal); }
-    .order-card .reward {
-      font-size: 14px; font-weight: 900; color: var(--gold-strong);
-      margin: 1px 0; font-variant-numeric: tabular-nums;
-    }
     .order-card .vehicle-hint { font-size: 9px; color: var(--text-3); font-weight: 600; margin: 1px 0; min-height: 11px; }
+    /* 空月台：无单/无车时的站台占位 */
+    .depot-empty {
+      grid-column: 1/-1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 4px; padding: 20px; color: var(--text-3); font-size: 12px; font-weight: 700;
+    }
+    .depot-empty .de-cargo { font-size: 26px; opacity: 0.6; filter: grayscale(0.4); }
+    /* 装车动效：派车成功时货堆从卡片飞出（触发式，挂 body，与跳金币同族） */
+    .cargo-fly {
+      position: fixed; z-index: 200; font-size: 22px; pointer-events: none;
+      transform: translate(-50%, -50%);
+      animation: cargoFly 0.9s steps(6) forwards;
+    }
+    @keyframes cargoFly { to { transform: translate(-50%, -160px); opacity: 0; } }
     /* 胶囊单行不换行：极端情况（车型组很多）行内横滑，绝不撑破卡片固定高度 */
     .order-card .pill-row { justify-content: center; margin: 1px 0; flex-wrap: nowrap; overflow-x: auto; }
     .order-card .pill { height: 20px; min-width: 23px; padding: 0 5px; font-size: 11px; flex: 0 0 auto; }
@@ -1048,7 +1211,7 @@
     .tutorial-box.longterm .desc { font-size: 12px; margin-bottom: 8px; }
     .tutorial-box.longterm .step-indicator { color: var(--gold-strong); }
 
-    /* ===== 💡 下一步提示（M5）：内嵌在底部状态条左段，不独占一行 ===== */
+    /* ===== 💡 下一步提示（M5）：工头老陈 👷 + 纸质气泡，内嵌在底部状态条左段 ===== */
     #hint-bar {
       display: none; align-items: center; gap: 6px;
       max-width: 62%; min-width: 0;
@@ -1057,7 +1220,22 @@
       font-size: 11px; font-weight: 700; color: #ffe08a;
       cursor: pointer; user-select: none; white-space: nowrap;
     }
-    #hint-bar:hover { color: #fff3c4; }
+    #hint-bar .foreman {
+      font-size: 17px; line-height: 1; flex-shrink: 0;
+      filter: drop-shadow(1px 1px 0 rgba(0,0,0,0.4));
+      animation: vdIdle 2s steps(2) infinite; /* 与展台车辆同款怠速 */
+    }
+    #hint-bar .hint-bubble {
+      position: relative; display: flex; align-items: center; gap: 5px; min-width: 0;
+      background: #fff8e7; color: #7a6417;
+      border: 2px solid var(--line); border-radius: 2px;
+      padding: 2px 8px; box-shadow: 2px 2px 0 rgba(0,0,0,0.35);
+    }
+    #hint-bar .hint-bubble::before { /* 气泡尾巴指向工头 */
+      content: ''; position: absolute; left: -6px; top: 50%; transform: translateY(-50%);
+      border: 3px solid transparent; border-right-color: var(--line);
+    }
+    #hint-bar:hover .hint-bubble { background: #fffdf6; }
     #hint-bar .hint-text { overflow: hidden; text-overflow: ellipsis; }
     #hint-bar .hint-arrow { font-weight: 900; flex-shrink: 0; }
   </style>
@@ -1076,18 +1254,24 @@
       <button id="btn-settings" title="设置" style="position:relative;z-index:1000;font-size:13px;cursor:pointer;padding:4px 10px;touch-action:manipulation;user-select:none;background:var(--bg-3);color:var(--text-1);border:1.5px solid var(--line);border-radius:8px;font-weight:800;">⚙️ 设置</button>
     </div>
 
-    <!-- 工作台 -->
+    <!-- 工作台（总装车间条）：图纸架选车 + 大开工按钮 + 迷你传送带成型 -->
     <div class="workbench" id="workbench">
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;">
         <div id="build-tier-select"></div>
-        <button class="btn btn-primary" id="btn-build">🔧 制造</button>
+        <button class="btn btn-primary" id="btn-build">🔨 开工</button>
         <button class="btn btn-secondary" id="btn-expand">🏠 扩建</button>
       </div>
       <div id="build-tier-info" class="build-info"></div>
       <!-- 制造按钮禁用原因（常驻可见，不依赖悬停） -->
       <div id="build-blocker" class="build-info blocker" style="display:none;"></div>
-      <!-- 建造进度（M7）：建造槽倒计时 + 排队列表 -->
-      <div id="build-status" style="display:none;width:100%;"></div>
+      <!-- 建造进度（M7）：结构常驻，JS 只改工件 emoji/clipPath/文字/队列（签名缓存，动画不被 1Hz 重建打断） -->
+      <div id="build-status" style="display:none;width:100%;">
+        <div class="wb-belt">
+          <span class="wb-wip idle" id="wb-wip">🛠️</span>
+          <span class="wb-wip-info" id="wb-wip-info"></span>
+          <span class="wb-queue" id="wb-queue"></span>
+        </div>
+      </div>
     </div>
 
     <!-- 主区域：车库 + 订单同屏展示（无页面滚动）；工厂/科技/成就面板切换时占据同一区域 -->

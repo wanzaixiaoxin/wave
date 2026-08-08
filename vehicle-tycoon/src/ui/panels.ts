@@ -141,7 +141,7 @@ export function buildTierOptions(): void {
 
   renderPills(container, pills, sel, (v) => { lastBuildTier = v; });
 
-  // 选中车型信息行：成本/占格/耗时，资源不足标红
+  // 选中车型信息行：大工件 + 成本吊牌（🪙/⚙️/⚡ 各自独立标红，哪样不够一目了然）
   const infoEl = document.getElementById('build-tier-info');
   if (infoEl && sel) {
     const cfg = getVehicleConfig(parseInt(sel, 10));
@@ -149,13 +149,15 @@ export function buildTierOptions(): void {
       const effCost = Math.floor(cfg.buildCost * getUpgradeMult(s, 'build_cost'));
       const effTime = Math.max(1, Math.round(cfg.buildTime * getUpgradeMult(s, 'build_time')));
       const effParts = getEffectivePartsCost(s, cfg.partsCost); // 与 createVehicle 同口径：精益制造折后价
-      const partsStr = effParts > 0 ? `${effParts}⚙️ ` : '';
-      const energyStr = `${buildEnergyCost(cfg.tier)}⚡`;
-      const afford = canAffordBuild(s, cfg.tier);
-      infoEl.innerHTML = `${cfg.emoji} ${cfg.name} · 占${cfg.parkingSpaces}格 · ` +
-        (afford
-          ? `${effCost.toLocaleString()}🪙 ${partsStr}${energyStr} · ${effTime}s`
-          : `<span class="poor">${effCost.toLocaleString()}🪙 ${partsStr}${energyStr} · ${effTime}s（资源不足）</span>`);
+      const effEnergy = buildEnergyCost(cfg.tier);
+      const tag = (icon: string, n: number, poor: boolean): string =>
+        `<span class="cost-tag${poor ? ' poor' : ''}">${icon} ${n.toLocaleString()}</span>`;
+      infoEl.innerHTML =
+        `<span class="wb-piece">${cfg.emoji}</span><b class="wb-piece-name">${cfg.name}</b>` +
+        tag('🪙', effCost, s.resources.gold < effCost) +
+        (effParts > 0 ? tag('⚙️', effParts, s.resources.parts < effParts) : '') +
+        tag('⚡', effEnergy, s.resources.energy < effEnergy) +
+        `<span class="cost-tag">⏱️ ${effTime}s</span><span class="cost-tag">🅿️ 占${cfg.parkingSpaces}格</span>`;
     }
   }
 }
@@ -166,6 +168,10 @@ export function getBuildTierSelection(): number {
 }
 
 // ==================== 工作台（M7：建造进度条 + 队列 + 按钮禁用） ====================
+
+// 工作台迷你传送带签名缓存：结构常驻（index.html），1Hz 只改 emoji/clipPath/文字，动画不被重建打断
+let lastWbWipSig = '';
+let lastWbQueueSig = '';
 
 export function renderWorkbench(): void {
   const s = getState();
@@ -220,38 +226,52 @@ export function renderWorkbench(): void {
   }
 
   if (!box) return;
-  if (queue.length === 0) {
-    // 槽位常驻：空闲时同样渲染「状态行 + 空进度条」，高度与建造中一致，版面零跳动
-    box.innerHTML = `
-      <div class="build-active"><span style="color:var(--text-3)">🔨 建造槽空闲 · 点击「制造」开工</span><span class="build-queue"></span></div>
-      <div class="build-progress"><div class="build-progress-bar" style="width:0%"></div></div>
-    `;
-    box.style.display = 'block';
-    return;
-  }
+  const wipEl = document.getElementById('wb-wip');
+  const wipInfo = document.getElementById('wb-wip-info');
+  const queueEl = document.getElementById('wb-queue');
+  if (!wipEl || !wipInfo || !queueEl) return;
   box.style.display = 'block';
 
-  // 建造槽：进度条 + 剩余秒数（finishAt 为真实时间戳，离线也正常走）
+  if (queue.length === 0) {
+    // 空闲：工件灰色待命，槽位常驻高度不变（CSS min-height 保底），版面零跳动
+    if (lastWbWipSig !== 'idle') {
+      lastWbWipSig = 'idle';
+      wipEl.textContent = '🛠️';
+      wipEl.classList.add('idle');
+      wipEl.style.clipPath = '';
+    }
+    wipInfo.textContent = '建造槽空闲 · 点击「开工」';
+    if (lastWbQueueSig !== '') { lastWbQueueSig = ''; queueEl.innerHTML = ''; }
+    return;
+  }
+
+  // 建造槽：工件在传送带上自下而上成型（clipPath 进度，finishAt 为真实时间戳，离线也正常走）
   const active = queue[0];
   const activeCfg = getVehicleConfig(active.tier);
   const remain = Math.max(0, Math.ceil((active.finishAt - Date.now()) / 1000));
-  const pct = active.totalTime > 0
-    ? Math.min(100, Math.round((1 - remain / active.totalTime) * 100))
-    : 100;
+  const progress = active.totalTime > 0
+    ? Math.min(1, Math.max(0, 1 - remain / active.totalTime))
+    : 1;
 
-  // 排队位：emoji + 各自耗时
-  const waiting = queue.slice(1).map(j => {
-    const c = getVehicleConfig(j.tier);
-    return `<span class="build-queue-item">${c?.emoji ?? '🚗'} ${j.totalTime}s</span>`;
-  }).join('');
+  const sig = String(active.tier);
+  if (sig !== lastWbWipSig) {
+    lastWbWipSig = sig;
+    wipEl.textContent = activeCfg?.emoji ?? '🚗';
+    wipEl.classList.remove('idle');
+  }
+  wipEl.style.clipPath = `inset(${Math.round((1 - progress) * 100)}% 0 0 0)`;
+  wipInfo.textContent = `${activeCfg?.name ?? 'T' + active.tier} · 剩余 ${remain}s · ${Math.round(progress * 100)}%`;
 
-  box.innerHTML = `
-    <div class="build-active">
-      <span>🔨 建造中 ${activeCfg?.emoji ?? ''} ${activeCfg?.name ?? 'T' + active.tier} · 剩余 ${remain}s</span>
-      <span class="build-queue">${waiting ? `📋 排队 ${waiting}` : ''}</span>
-    </div>
-    <div class="build-progress"><div class="build-progress-bar" style="width:${pct}%"></div></div>
-  `;
+  // 排队位：小车在传送带右端等候
+  const q = queue.slice(1);
+  const qsig = q.map(j => j.tier).join(',');
+  if (qsig !== lastWbQueueSig) {
+    lastWbQueueSig = qsig;
+    queueEl.innerHTML = q.length > 0
+      ? '<span class="q-label">队列</span>' +
+        q.map(j => `<span class="q-car">${getVehicleConfig(j.tier)?.emoji ?? '🚗'}</span>`).join('')
+      : '';
+  }
 }
 
 // ==================== 工厂 ====================
